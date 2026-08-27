@@ -1,0 +1,160 @@
+/* ════════ Glass Games ════════
+   Reuses .glass / .chat-card / .chat-header / .icon-btn from style.css
+   so this page always matches Glass Chat's current theme exactly —
+   only the content area (the bubble menu) is new. */
+
+.games-card { display: flex; flex-direction: column; }
+
+.games-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 18px 22px 40px;
+  position: relative;
+}
+.games-body::-webkit-scrollbar { width: 3px; }
+.games-body::-webkit-scrollbar-thumb { background: rgba(21,36,58,0.16); border-radius: 3px; }
+.games-body::-webkit-scrollbar-track { background: transparent; }
+
+.games-search-input {
+  display: block;
+  width: 100%;
+  padding: 11px 16px;
+  margin-bottom: 16px;
+  border-radius: 16px;
+  border: 1.5px solid rgba(255,255,255,0.45);
+  background: rgba(255,255,255,0.32);
+  color: var(--ink);
+  font-size: 14px;
+  font-family: inherit;
+  font-weight: 500;
+  outline: none;
+  transition: border-color .2s var(--ease), background .2s var(--ease), box-shadow .2s var(--ease);
+}
+.games-search-input::placeholder { color: rgba(21,36,58,.40); }
+.games-search-input:focus { border-color: color-mix(in srgb, var(--blue) 55%, transparent); background: rgba(255,255,255,0.45); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 14%, transparent); }
+
+.bubble-field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 30px 22px;
+  justify-content: center;
+  align-content: flex-start;
+  min-height: 100%;
+  padding-top: 10px;
+}
+
+/* Outer layer handles the ambient float; inner layer handles hover/click,
+   so the two transforms never fight each other. */
+.bubble-float {
+  display: block;
+  text-decoration: none;
+  animation: bubbleFloat var(--dur, 6s) ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+  will-change: transform;
+}
+@keyframes bubbleFloat {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  25%      { transform: translate(4px, -10px) rotate(-2deg); }
+  50%      { transform: translate(-4px, -3px) rotate(1.2deg); }
+  75%      { transform: translate(3px, -14px) rotate(2deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bubble-float { animation: none; }
+}
+
+.game-bubble {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(112px, 26vw, 148px);
+  height: clamp(112px, 26vw, 148px);
+  border-radius: 50%;
+  cursor: pointer;
+  overflow: hidden;
+  isolation: isolate;
+  filter: hue-rotate(var(--hue, 0deg));
+  background:
+    radial-gradient(circle at 32% 26%, color-mix(in srgb, #ffffff 65%, var(--blue-light)) 0%, color-mix(in srgb, var(--blue) 70%, transparent) 44%, color-mix(in srgb, var(--blue-deep) 78%, transparent) 100%);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(6px) saturate(200%);
+  -webkit-backdrop-filter: blur(6px) saturate(200%);
+  box-shadow:
+    inset 0 2px 4px rgba(255,255,255,.55),
+    inset 0 -6px 14px rgba(0,0,0,.14),
+    0 10px 26px rgba(15,40,60,.22);
+  transition: transform .18s var(--ease), box-shadow .18s var(--ease);
+}
+.game-bubble::before {
+  /* the bright highlight spot every real bubble/sphere has */
+  content: '';
+  position: absolute;
+  top: 14%; left: 20%;
+  width: 34%; height: 22%;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.75);
+  filter: blur(3px);
+  transform: rotate(-18deg);
+  pointer-events: none;
+}
+.game-bubble:hover { transform: scale(1.07); box-shadow: inset 0 2px 4px rgba(255,255,255,.6), inset 0 -6px 14px rgba(0,0,0,.14), 0 14px 32px rgba(15,40,60,.30); }
+.game-bubble:active { transform: scale(.95); }
+.game-bubble.popping { animation: bubblePop .26s var(--ease-in) forwards; }
+@keyframes bubblePop {
+  0%   { transform: scale(1); opacity: 1; }
+  55%  { transform: scale(1.22); opacity: .85; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+
+.game-bubble-label {
+  position: relative;
+  z-index: 1;
+  max-width: 74%;
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #fff;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0,0,0,.35);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── empty state ── */
+.games-empty {
+  position: relative;
+  height: 100%;
+  min-height: 380px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+  padding: 20px;
+}
+.games-empty-icon { color: var(--ink-soft); opacity: .55; margin-bottom: 4px; }
+.games-empty-icon svg { width: 56px; height: 56px; }
+.games-empty-title { font-size: 17px; font-weight: 800; color: var(--ink); letter-spacing: -.2px; }
+.games-empty-sub { font-size: 13px; color: var(--ink-soft); max-width: 280px; line-height: 1.5; }
+
+.ghost-bubble {
+  position: absolute;
+  border-radius: 50%;
+  border: 1.5px dashed var(--glass-border);
+  opacity: .5;
+  animation: bubbleFloat 7s ease-in-out infinite;
+}
+.ghost-bubble.gb-a { width: 46px; height: 46px; top: 14%; left: 18%; animation-delay: -1.2s; }
+.ghost-bubble.gb-b { width: 30px; height: 30px; bottom: 20%; right: 20%; animation-delay: -3.4s; animation-duration: 5.5s; }
+@media (prefers-reduced-motion: reduce) {
+  .ghost-bubble { animation: none; }
+}
+
+@media (max-width: 480px) {
+  .games-card { height: 100%; width: 100%; border-radius: 24px; }
+  .games-body { padding: 22px 14px 30px; }
+}

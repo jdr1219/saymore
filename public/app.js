@@ -3,168 +3,9 @@ const socket = io();
 
 const $ = id => document.getElementById(id);
 
-/* ════════════════════════════════════════════════
-   THEME SYSTEM — 15 selectable palettes. Switching a
-   theme recolors the glass tint (via CSS custom props),
-   the Vanta fog background, and the browser tab/bookmark
-   favicons. Colors crossfade smoothly (~650ms) instead of
-   snapping — Chrome-theme-picker style — and the Vanta fog
-   is tweened in lockstep, frame by frame.
-   NOTE: this only swaps the <link> favicon tags. The in-app
-   avatar placeholders are a separate, per-user thing and are
-   deliberately left untouched so switching themes never
-   clobbers someone's uploaded profile photo.
-════════════════════════════════════════════════ */
-const THEMES = [
-  { id:'sky', name:'Sky Blue & White', slug:'', dark:false,
-    blue:'#3fa9e0', blueDeep:'#1f7fc9', blueLight:'#a3cfff', bluePale:'#cfe9ff',
-    ink:'#15243a', inkSoft:'#4a6a8a',
-    glassBg:'rgba(255,255,255,0.045)', glassBorder:'rgba(255,255,255,0.38)',
-    ownBg:'rgba(63,169,224,0.30)', ownBorder:'rgba(63,169,224,0.42)',
-    recvBg:'rgba(255,255,255,0.62)', recvBorder:'rgba(255,255,255,0.55)',
-    alert:'#1f4e7a', bodyBg:'#9fd8f0',
-    popupBg:'rgba(255,255,255,0.92)', popupBorder:'rgba(255,255,255,0.7)',
-    vanta:{ highlight:0x48b8e3, midtone:0xa3cfff, lowlight:0x28b1a6, base:0xffffff } },
-  { id:'mono', name:'Black, Grey & White', slug:'mono', dark:true,
-    blue:'#9aa4ad', blueDeep:'#6b7480', blueLight:'#c7ced4', bluePale:'#e7eaee',
-    ink:'#f2f4f6', inkSoft:'#b7bfc7',
-    glassBg:'rgba(20,20,22,0.38)', glassBorder:'rgba(255,255,255,0.14)',
-    ownBg:'rgba(154,164,173,0.34)', ownBorder:'rgba(154,164,173,0.5)',
-    recvBg:'rgba(40,42,46,0.62)', recvBorder:'rgba(255,255,255,0.14)',
-    alert:'#e2574c', bodyBg:'#1a1b1e',
-    popupBg:'rgba(24,24,26,0.94)', popupBorder:'rgba(255,255,255,0.12)',
-    vanta:{ highlight:0x8b98a3, midtone:0x3a3d42, lowlight:0x111214, base:0x000000 } },
-  { id:'rose', name:'French Rose & White', slug:'rose', dark:false,
-    blue:'#e88fa8', blueDeep:'#c85f82', blueLight:'#f7c9d6', bluePale:'#fde8ee',
-    ink:'#3a1f2a', inkSoft:'#8a5b6c',
-    glassBg:'rgba(255,255,255,0.045)', glassBorder:'rgba(255,255,255,0.4)',
-    ownBg:'rgba(232,143,168,0.32)', ownBorder:'rgba(232,143,168,0.45)',
-    recvBg:'rgba(255,255,255,0.65)', recvBorder:'rgba(255,255,255,0.55)',
-    alert:'#a3355a', bodyBg:'#f6d3de',
-    popupBg:'rgba(255,255,255,0.92)', popupBorder:'rgba(255,255,255,0.7)',
-    vanta:{ highlight:0xe88fa8, midtone:0xf7c9d6, lowlight:0xc85f82, base:0xffffff } },
-  { id:'crimson', name:'Red & Black', slug:'crimson', dark:true,
-    blue:'#e0483f', blueDeep:'#a5271f', blueLight:'#f28e86', bluePale:'#f9c9c5',
-    ink:'#f7e9e8', inkSoft:'#d4a8a5',
-    glassBg:'rgba(24,16,16,0.4)', glassBorder:'rgba(255,255,255,0.14)',
-    ownBg:'rgba(224,72,63,0.36)', ownBorder:'rgba(224,72,63,0.5)',
-    recvBg:'rgba(40,26,26,0.62)', recvBorder:'rgba(255,255,255,0.14)',
-    alert:'#ff6b5e', bodyBg:'#150808',
-    popupBg:'rgba(26,16,16,0.94)', popupBorder:'rgba(255,255,255,0.12)',
-    vanta:{ highlight:0xe0483f, midtone:0x5c1a16, lowlight:0x1a0808, base:0x000000 } },
-  { id:'sunset', name:'Red, Orange & Yellow', slug:'sunset', dark:false,
-    blue:'#f4762b', blueDeep:'#d3450f', blueLight:'#ffb066', bluePale:'#ffe3b0',
-    ink:'#3a1e0a', inkSoft:'#8a5a2e',
-    glassBg:'rgba(255,255,255,0.06)', glassBorder:'rgba(255,255,255,0.4)',
-    ownBg:'rgba(244,118,43,0.32)', ownBorder:'rgba(244,118,43,0.46)',
-    recvBg:'rgba(255,255,255,0.62)', recvBorder:'rgba(255,255,255,0.55)',
-    alert:'#c73e1d', bodyBg:'#ffb84d',
-    popupBg:'rgba(255,255,255,0.92)', popupBorder:'rgba(255,255,255,0.7)',
-    vanta:{ highlight:0xff6a3d, midtone:0xffce54, lowlight:0xd3450f, base:0xfff3d6 } },
-  { id:'gold', name:'Yellow & White', slug:'gold', dark:false,
-    blue:'#e0b83f', blueDeep:'#b6920f', blueLight:'#f2dd8f', bluePale:'#faf0cf',
-    ink:'#3a3010', inkSoft:'#8a7a40',
-    glassBg:'rgba(255,255,255,0.06)', glassBorder:'rgba(255,255,255,0.42)',
-    ownBg:'rgba(224,184,63,0.34)', ownBorder:'rgba(224,184,63,0.48)',
-    recvBg:'rgba(255,255,255,0.66)', recvBorder:'rgba(255,255,255,0.56)',
-    alert:'#a17a12', bodyBg:'#fbe89a',
-    popupBg:'rgba(255,255,255,0.92)', popupBorder:'rgba(255,255,255,0.7)',
-    vanta:{ highlight:0xe0b83f, midtone:0xf2dd8f, lowlight:0xb6920f, base:0xffffff } },
-  { id:'sage', name:'Pastel Green & Beige', slug:'sage', dark:false,
-    blue:'#8fae86', blueDeep:'#5f8054', blueLight:'#c4d8bd', bluePale:'#e8f0e2',
-    ink:'#2a3324', inkSoft:'#6f7d64',
-    glassBg:'rgba(255,255,255,0.08)', glassBorder:'rgba(255,255,255,0.44)',
-    ownBg:'rgba(143,174,134,0.32)', ownBorder:'rgba(143,174,134,0.45)',
-    recvBg:'rgba(255,255,255,0.66)', recvBorder:'rgba(255,255,255,0.55)',
-    alert:'#7a5a2e', bodyBg:'#e6ddc4',
-    popupBg:'rgba(255,255,255,0.92)', popupBorder:'rgba(255,255,255,0.7)',
-    vanta:{ highlight:0x9fbf94, midtone:0xd9d0b0, lowlight:0x6f9060, base:0xf5f0e0 } },
-  { id:'hacker', name:'Hacker Green & Black', slug:'hacker', dark:true,
-    blue:'#39ff6a', blueDeep:'#1fbf4a', blueLight:'#8dffab', bluePale:'#c9ffd6',
-    ink:'#c9ffd2', inkSoft:'#5fcf7d',
-    glassBg:'rgba(10,20,12,0.42)', glassBorder:'rgba(57,255,106,0.22)',
-    ownBg:'rgba(57,255,106,0.22)', ownBorder:'rgba(57,255,106,0.45)',
-    recvBg:'rgba(10,26,14,0.66)', recvBorder:'rgba(57,255,106,0.20)',
-    alert:'#ff5555', bodyBg:'#050a06',
-    popupBg:'rgba(6,16,8,0.94)', popupBorder:'rgba(57,255,106,0.25)',
-    vanta:{ highlight:0x39ff6a, midtone:0x0f4d24, lowlight:0x030906, base:0x000000 } },
-  { id:'forest', name:'Brown & Forest Green', slug:'forest', dark:true,
-    blue:'#a9884f', blueDeep:'#7a5f38', blueLight:'#cbb27f', bluePale:'#ecdfc0',
-    ink:'#f2ecd8', inkSoft:'#c9c19a',
-    glassBg:'rgba(30,58,40,0.42)', glassBorder:'rgba(255,255,255,0.13)',
-    ownBg:'rgba(169,136,79,0.34)', ownBorder:'rgba(169,136,79,0.48)',
-    recvBg:'rgba(42,74,52,0.64)', recvBorder:'rgba(255,255,255,0.13)',
-    alert:'#c97a3e', bodyBg:'#1f4d2e',
-    popupBg:'rgba(22,44,30,0.94)', popupBorder:'rgba(255,255,255,0.12)',
-    vanta:{ highlight:0xa9884f, midtone:0x2d6a42, lowlight:0x14301e, base:0x0a1810 } },
-  { id:'cobalt', name:'Blue & Deep Blue', slug:'cobalt', dark:false,
-    blue:'#3a6fd8', blueDeep:'#1c3f96', blueLight:'#8fb0ee', bluePale:'#d3e0fb',
-    ink:'#101a33', inkSoft:'#48587a',
-    glassBg:'rgba(255,255,255,0.07)', glassBorder:'rgba(255,255,255,0.4)',
-    ownBg:'rgba(58,111,216,0.32)', ownBorder:'rgba(58,111,216,0.46)',
-    recvBg:'rgba(255,255,255,0.62)', recvBorder:'rgba(255,255,255,0.55)',
-    alert:'#1c3f96', bodyBg:'#7fa3e8',
-    popupBg:'rgba(255,255,255,0.92)', popupBorder:'rgba(255,255,255,0.7)',
-    vanta:{ highlight:0x3a6fd8, midtone:0x8fb0ee, lowlight:0x1c3f96, base:0xe8f0ff } },
-  { id:'violet', name:'Purple & Blue', slug:'violet', dark:false,
-    blue:'#8a6fe0', blueDeep:'#5a3fc4', blueLight:'#bda8f2', bluePale:'#e3d9fb',
-    ink:'#211238', inkSoft:'#5e4a80',
-    glassBg:'rgba(255,255,255,0.07)', glassBorder:'rgba(255,255,255,0.4)',
-    ownBg:'rgba(138,111,224,0.32)', ownBorder:'rgba(138,111,224,0.46)',
-    recvBg:'rgba(255,255,255,0.63)', recvBorder:'rgba(255,255,255,0.55)',
-    alert:'#5a3fc4', bodyBg:'#b3a3ec',
-    popupBg:'rgba(255,255,255,0.92)', popupBorder:'rgba(255,255,255,0.7)',
-    vanta:{ highlight:0x8a6fe0, midtone:0x6f8fea, lowlight:0x5a3fc4, base:0xf0ecff } },
-  { id:'lavender', name:'Purple & White', slug:'lavender', dark:false,
-    blue:'#a98ee0', blueDeep:'#7c5cc7', blueLight:'#d3c0f2', bluePale:'#f0e8fb',
-    ink:'#2e2140', inkSoft:'#6c5a8a',
-    glassBg:'rgba(255,255,255,0.07)', glassBorder:'rgba(255,255,255,0.42)',
-    ownBg:'rgba(169,142,224,0.30)', ownBorder:'rgba(169,142,224,0.44)',
-    recvBg:'rgba(255,255,255,0.66)', recvBorder:'rgba(255,255,255,0.56)',
-    alert:'#7c5cc7', bodyBg:'#e5d9f7',
-    popupBg:'rgba(255,255,255,0.92)', popupBorder:'rgba(255,255,255,0.7)',
-    vanta:{ highlight:0xa98ee0, midtone:0xd3c0f2, lowlight:0x7c5cc7, base:0xffffff } },
-  { id:'platinum', name:'White & Silver', slug:'platinum', dark:false,
-    blue:'#9aa3ab', blueDeep:'#707a82', blueLight:'#c9d0d6', bluePale:'#eef1f3',
-    ink:'#20262b', inkSoft:'#5c6871',
-    glassBg:'rgba(255,255,255,0.10)', glassBorder:'rgba(255,255,255,0.5)',
-    ownBg:'rgba(154,163,171,0.28)', ownBorder:'rgba(154,163,171,0.42)',
-    recvBg:'rgba(255,255,255,0.70)', recvBorder:'rgba(255,255,255,0.6)',
-    alert:'#54626b', bodyBg:'#dde3e7',
-    popupBg:'rgba(255,255,255,0.94)', popupBorder:'rgba(255,255,255,0.75)',
-    vanta:{ highlight:0xc3cbd1, midtone:0xe8ecef, lowlight:0x9aa3ab, base:0xffffff } },
-  { id:'champagne', name:'Silver & Gold', slug:'champagne', dark:false,
-    blue:'#c9a865', blueDeep:'#a3813e', blueLight:'#e0cc9a', bluePale:'#f4ecd8',
-    ink:'#2e2818', inkSoft:'#7a6c48',
-    glassBg:'rgba(255,255,255,0.09)', glassBorder:'rgba(255,255,255,0.46)',
-    ownBg:'rgba(201,168,101,0.30)', ownBorder:'rgba(201,168,101,0.44)',
-    recvBg:'rgba(255,255,255,0.68)', recvBorder:'rgba(255,255,255,0.58)',
-    alert:'#8a6a2e', bodyBg:'#e8dcc0',
-    popupBg:'rgba(255,255,255,0.93)', popupBorder:'rgba(255,255,255,0.72)',
-    vanta:{ highlight:0xc9a865, midtone:0xe0cc9a, lowlight:0xa3813e, base:0xfaf3e2 } },
-  { id:'berry', name:'Blue, Purple & Red', slug:'berry', dark:false,
-    blue:'#3d6fe0', blueDeep:'#8a3fd6', blueLight:'#e0546b', bluePale:'#f2d3db',
-    ink:'#191233', inkSoft:'#5a4a78',
-    glassBg:'rgba(255,255,255,0.07)', glassBorder:'rgba(255,255,255,0.42)',
-    ownBg:'rgba(61,111,224,0.32)', ownBorder:'rgba(61,111,224,0.46)',
-    recvBg:'rgba(255,255,255,0.66)', recvBorder:'rgba(255,255,255,0.56)',
-    alert:'#b3271f', bodyBg:'#5a7ee8',
-    popupBg:'rgba(255,255,255,0.92)', popupBorder:'rgba(255,255,255,0.7)',
-    vanta:{ highlight:0xe0546b, midtone:0x8a3fd6, lowlight:0x3d6fe0, base:0xf5eef8 } },
-];
-
-const THEME_VAR_MAP = {
-  blue:'--blue', blueDeep:'--blue-deep', blueLight:'--blue-light', bluePale:'--blue-pale',
-  ink:'--ink', inkSoft:'--ink-soft',
-  glassBg:'--glass-bg', glassBorder:'--glass-border',
-  ownBg:'--own-bg', ownBorder:'--own-border',
-  recvBg:'--recv-bg', recvBorder:'--recv-border',
-  alert:'--alert', bodyBg:'--body-bg',
-  popupBg:'--popup-bg', popupBorder:'--popup-border',
-};
-
-function getTheme(id) { return THEMES.find(t => t.id === id) || THEMES[0]; }
-
+/* THEMES, THEME_VAR_MAP, and getTheme() now live in themes-data.js
+   (shared with Glass Games and any future page) — loaded via a
+   <script> tag in index.html before this file. */
 function parseColorStr(str) {
   str = String(str).trim();
   if (str[0] === '#') {
@@ -335,6 +176,14 @@ let lastDateKey = '';
 const GROUP_GAP = 60000;
 const AV_COLORS = ['#3fa9e0','#1f7fc9','#5ab3e6','#2f8fd4','#6cc2ec','#1a6bb8'];
 const REACTION_SET = ['👍','❤️','😂','😮','😢','🙏'];
+const ROOM_ICON_SET = ['🫧','💬','🎮','🎲','🎧','📚','🎨','🍕','☕','🌙','⚡','🔥','🌊','🐝','🎬','⭐'];
+
+/* ── rooms / sidebar state ── */
+let currentRoomId = 'general';
+let currentRoomInfo = { id: 'general', name: 'General', icon: '💬', isDefault: true, isAdmin: false };
+let myRooms = [];
+let notificationsList = [];
+function roomOf(msgId) { return allMessages.get(msgId)?.roomId || currentRoomId; }
 
 const userColor = n => { let h=0; for (const c of n) h=(h*31+c.charCodeAt(0))&0xffff; return AV_COLORS[h%AV_COLORS.length]; };
 const fmtTime = ts => new Date(ts||Date.now()).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
@@ -406,6 +255,20 @@ function ripple(x,y){
   r.className='ripple-ring'; r.style.left=x+'px'; r.style.top=y+'px';
   document.body.appendChild(r);
   setTimeout(()=>r.remove(),520);
+}
+
+let toastTimer = null;
+function showToast(msg) {
+  let t = document.getElementById('gc-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'gc-toast'; t.className = 'gc-toast';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  clearTimeout(toastTimer);
+  requestAnimationFrame(() => t.classList.add('show'));
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
 }
 
 /* ── notification sound: soft two-note chime, gentle attack/decay ── */
@@ -494,7 +357,7 @@ function removeFromRecentlyDeleted(id) {
    to globally delete it (only valid/used for your OWN messages). */
 function hideMessageLocally(msg, alsoUnsend) {
   addToRecentlyDeleted({ ...msg, wasGlobalUnsend: !!alsoUnsend });
-  if (alsoUnsend) socket.emit('delete-msg', { id: msg.id });
+  if (alsoUnsend) socket.emit('delete-msg', { id: msg.id, roomId: msg.roomId || currentRoomId });
   rerenderAll();
 }
 
@@ -615,8 +478,9 @@ socket.on('name-taken', () => {
   $('name-input').classList.remove('shake'); void $('name-input').offsetWidth; $('name-input').classList.add('shake');
 });
 socket.on('error-msg', msg => {
-  if ($('profile-menu').classList.contains('open')) $('profile-menu-error').textContent = msg;
-  else showFieldError(msg);
+  if ($('profile-menu').classList.contains('open')) { $('profile-menu-error').textContent = msg; return; }
+  if (!$('login-screen').classList.contains('hidden')) { showFieldError(msg); return; }
+  showToast(msg);
 });
 
 socket.on('join-success', () => {
@@ -723,6 +587,11 @@ async function signOut() {
   $('messages').innerHTML = '';
   allMessages.clear();
   lastGroupEl = null; lastGroupUser = null; lastDateKey = '';
+  currentRoomId = 'general';
+  currentRoomInfo = { id: 'general', name: 'General', icon: '💬', isDefault: true, isAdmin: false };
+  myRooms = []; notificationsList = [];
+  renderRoomList(); renderNotiList(); updateCurrentRoomLabel();
+  collapseRailSections(); closeMobileRail();
 
   $('name-input').value = '';
   showFieldError('');
@@ -772,7 +641,7 @@ function renderReactions(msgId, reactions) {
     pill.className = 'reaction-pill' + (r.users.includes(myName) ? ' mine' : '');
     pill.textContent = `${r.emoji} ${r.users.length}`;
     pill.title = r.users.join(', ');
-    pill.addEventListener('click', () => socket.emit('react', { msgId, emoji: r.emoji }));
+    pill.addEventListener('click', () => socket.emit('react', { msgId, emoji: r.emoji, roomId: roomOf(msgId) }));
     row.appendChild(pill);
   });
   return row;
@@ -785,7 +654,7 @@ function openEmojiPicker(msgId, anchorEl) {
   REACTION_SET.forEach(e => {
     const b = document.createElement('button');
     b.textContent = e;
-    b.addEventListener('click', () => { socket.emit('react', { msgId, emoji: e }); picker.remove(); });
+    b.addEventListener('click', () => { socket.emit('react', { msgId, emoji: e, roomId: roomOf(msgId) }); picker.remove(); });
     picker.appendChild(b);
   });
   anchorEl.style.position = 'relative';
@@ -946,7 +815,7 @@ $('select-delete-btn').addEventListener('click', () => {
     if (!msg) continue;
     const isOwn = msg.user === myName;
     addToRecentlyDeleted({ ...msg, wasGlobalUnsend: isOwn });
-    if (isOwn) socket.emit('delete-msg', { id });
+    if (isOwn) socket.emit('delete-msg', { id, roomId: msg.roomId || currentRoomId });
   }
   exitSelectMode();
   rerenderAll();
@@ -1177,7 +1046,7 @@ function addMessage(data, isOwn, fromHistory) {
   if (isOwn || atBottom || fromHistory) { box.scrollTop = box.scrollHeight; }
   else { bumpUnread(); }
 
-  if (!isOwn && data.id && !data.deleted) socket.emit('seen', { id: data.id });
+  if (!isOwn && data.id && !data.deleted) socket.emit('seen', { id: data.id, roomId: data.roomId || currentRoomId });
   if (!isOwn && !fromHistory) {
     chime();
     if (notifOn && document.hidden) notify(data.user, data.text || 'Sent an image');
@@ -1193,7 +1062,9 @@ function rerenderAll() {
   box.innerHTML = '';
   lastGroupEl = null; lastGroupUser = null; lastDateKey = '';
   const hidden = getHiddenIds();
-  const sorted = [...allMessages.values()].sort((a, b) => a.ts - b.ts);
+  const sorted = [...allMessages.values()]
+    .filter(m => (m.roomId || 'general') === currentRoomId)
+    .sort((a, b) => a.ts - b.ts);
   if (hasMoreHistory) renderLoadMoreRow();
   sorted.forEach(m => {
     if (hidden.has(m.id)) return;
@@ -1227,7 +1098,7 @@ let lastTypingEmit = 0;
 $('msg-input').addEventListener('input', () => {
   if (!myName) return;
   const now = Date.now();
-  if (now - lastTypingEmit > 1200) { socket.emit('typing'); lastTypingEmit = now; }
+  if (now - lastTypingEmit > 1200) { socket.emit('typing', { roomId: currentRoomId }); lastTypingEmit = now; }
   autoResize();
 });
 function autoResize() {
@@ -1243,13 +1114,13 @@ function sendMsg() {
   if (!text && !pendingImage) return;
 
   if (editTarget) {
-    socket.emit('edit-msg', { id: editTarget.id, text });
+    socket.emit('edit-msg', { id: editTarget.id, text, roomId: editTarget.roomId || currentRoomId });
     editTarget = null; $('edit-bar').classList.remove('open');
     inp.value = ''; autoResize();
     return;
   }
 
-  socket.emit('message', { text, image: pendingImage, replyTo: replyTarget ? { id: replyTarget.id, user: replyTarget.user, text: replyTarget.text } : null });
+  socket.emit('message', { text, image: pendingImage, roomId: currentRoomId, replyTo: replyTarget ? { id: replyTarget.id, user: replyTarget.user, text: replyTarget.text } : null });
   inp.value = ''; autoResize();
   pendingImage = null; $('img-preview-bar').classList.remove('open'); $('img-preview-bar').innerHTML = '';
   replyTarget = null; $('reply-bar').classList.remove('open');
@@ -1388,7 +1259,7 @@ function renderLoadMoreRow() {
   if (!hasMoreHistory) return;
   const row = document.createElement('div'); row.id = 'load-more-row'; row.className = 'load-more-row';
   const btn = document.createElement('button'); btn.className = 'load-more-btn'; btn.textContent = 'Load earlier messages';
-  btn.addEventListener('click', () => socket.emit('load-more', { before: oldestTs }));
+  btn.addEventListener('click', () => socket.emit('load-more', { before: oldestTs, roomId: currentRoomId }));
   row.appendChild(btn);
   $('messages').prepend(row);
 }
@@ -1434,6 +1305,7 @@ socket.on('more-history', ({ msgs, hasMore }) => {
 
 socket.on('message', data => {
   allMessages.set(data.id, data);
+  if ((data.roomId || 'general') !== currentRoomId) return; // cached for later, not for this room's view
   if (getHiddenIds().has(data.id)) return;
   const isOwn = data.socketId === socket.id;
   addMessage(data, isOwn, false);
@@ -1492,16 +1364,435 @@ socket.on('link-preview', ({ msgId, preview }) => {
     <div class="lp-body"><div class="lp-title">${escapeHtml(preview.title||'')}</div><div class="lp-desc">${escapeHtml(preview.desc||'')}</div></div>`;
   bubble.appendChild(a);
 });
-socket.on('typing', user => {
+socket.on('typing', ({ user, roomId } = {}) => {
   if (typeof user !== 'string' || user === myName) return;
+  if ((roomId || 'general') !== currentRoomId) return;
   showTyping(user);
   clearTimeout(typingTimers[user]);
   typingTimers[user] = setTimeout(removeTypingRow, 2200);
 });
-socket.on('system', text => addSystem(text));
+socket.on('system', text => { if (currentRoomId === 'general') addSystem(text); });
 socket.on('user-count', n => { $('online-count').textContent = `${n} online`; });
 
 socket.on('disconnect', () => { if (hasJoinedOnce) showReconnectBanner(); });
 socket.on('connect', () => {
-  if (hasJoinedOnce && myName) socket.emit('join', { name: myName, clientId, avatar: myAvatar });
+  if (hasJoinedOnce && myName) {
+    socket.emit('join', { name: myName, clientId, avatar: myAvatar });
+    if (currentRoomId !== 'general') socket.emit('switch-room', { roomId: currentRoomId });
+  }
 });
+
+/* ════════════════════════════════════════════════
+   ROOMS + NOTIFICATIONS SIDEBAR
+════════════════════════════════════════════════ */
+function timeAgoShort(ts) {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return 'now';
+  if (s < 3600) return `${Math.floor(s/60)}m`;
+  if (s < 86400) return `${Math.floor(s/3600)}h`;
+  return `${Math.floor(s/86400)}d`;
+}
+
+function updateCurrentRoomLabel() {
+  $('current-room-icon').textContent = currentRoomInfo.icon || '💬';
+  $('current-room-name').textContent = currentRoomInfo.name || 'General';
+  $('current-room-label').title = currentRoomInfo.isAdmin ? `${currentRoomInfo.name} — you're the admin` : currentRoomInfo.name;
+}
+
+function renderRoomList() {
+  const list = $('room-list');
+  list.innerHTML = '';
+  if (!myRooms.length) {
+    list.innerHTML = '<div class="room-list-empty">No rooms yet</div>';
+    return;
+  }
+  myRooms.forEach(room => {
+    const row = document.createElement('div');
+    row.className = 'room-row' + (room.id === currentRoomId ? ' active' : '');
+    row.dataset.roomId = room.id;
+
+    const icon = document.createElement('span');
+    icon.className = 'room-row-icon';
+    icon.textContent = room.icon || '💬';
+    row.appendChild(icon);
+
+    const name = document.createElement('span');
+    name.className = 'room-row-name';
+    name.textContent = room.name;
+    row.appendChild(name);
+
+    if (room.isAdmin || room.isCoAdmin) {
+      const badge = document.createElement('span');
+      badge.className = 'room-row-admin-badge';
+      badge.textContent = room.isAdmin ? 'ADMIN' : 'CO-ADMIN';
+      row.appendChild(badge);
+
+      const membersBtn = document.createElement('button');
+      membersBtn.className = 'room-row-icon-edit';
+      membersBtn.title = 'Members';
+      membersBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+      membersBtn.addEventListener('click', e => { e.stopPropagation(); openMemberPopup(room, membersBtn); });
+      row.appendChild(membersBtn);
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'room-row-icon-edit';
+      editBtn.title = 'Change room icon';
+      editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+      editBtn.addEventListener('click', e => { e.stopPropagation(); openIconPicker(room.id, editBtn); });
+      row.appendChild(editBtn);
+    }
+
+    row.addEventListener('click', () => switchToRoom(room.id));
+    list.appendChild(row);
+  });
+}
+
+function openIconPicker(roomId, anchorEl) {
+  document.querySelectorAll('.icon-picker, .member-popup').forEach(p => p.remove());
+  const picker = document.createElement('div');
+  picker.className = 'icon-picker';
+  ROOM_ICON_SET.forEach(icon => {
+    const b = document.createElement('button');
+    b.textContent = icon;
+    b.addEventListener('click', () => { socket.emit('set-room-icon', { roomId, icon }); picker.remove(); });
+    picker.appendChild(b);
+  });
+  document.body.appendChild(picker);
+  const r = anchorEl.getBoundingClientRect();
+  picker.style.top = (r.bottom + 6) + 'px';
+  picker.style.left = Math.min(r.left, window.innerWidth - 160) + 'px';
+  const close = ev => { if (!picker.contains(ev.target) && ev.target !== anchorEl) { picker.remove(); document.removeEventListener('click', close); } };
+  setTimeout(() => document.addEventListener('click', close), 0);
+}
+
+/* Member roster for a room you administer/co-admin — lets you promote
+   an existing member to co-admin (a request they still have to accept). */
+function openMemberPopup(room, anchorEl) {
+  document.querySelectorAll('.icon-picker, .member-popup').forEach(p => p.remove());
+  const pop = document.createElement('div');
+  pop.className = 'member-popup';
+  const title = document.createElement('div');
+  title.className = 'member-popup-title';
+  title.textContent = `${room.name} members`;
+  pop.appendChild(title);
+
+  const members = room.members || [];
+  if (!members.length) {
+    const empty = document.createElement('div');
+    empty.className = 'member-popup-empty'; empty.textContent = 'No members yet';
+    pop.appendChild(empty);
+  }
+  members.forEach(m => {
+    const row = document.createElement('div');
+    row.className = 'member-popup-row';
+    const name = document.createElement('span');
+    name.className = 'member-popup-name';
+    name.textContent = m.name + (m.role !== 'member' ? ` · ${m.role}` : '');
+    row.appendChild(name);
+    if (m.role === 'member' && m.name.toLowerCase() !== myName.toLowerCase()) {
+      const btn = document.createElement('button');
+      btn.className = 'member-popup-promote';
+      btn.textContent = 'Make co-admin';
+      btn.addEventListener('click', () => {
+        socket.emit('invite-to-room', { roomId: room.id, name: m.name, asCoAdmin: true });
+        btn.textContent = 'Requested'; btn.disabled = true;
+      });
+      row.appendChild(btn);
+    }
+    pop.appendChild(row);
+  });
+
+  document.body.appendChild(pop);
+  const r = anchorEl.getBoundingClientRect();
+  pop.style.top = (r.bottom + 6) + 'px';
+  pop.style.left = Math.min(r.left, window.innerWidth - 230) + 'px';
+  const close = ev => { if (!pop.contains(ev.target) && ev.target !== anchorEl) { pop.remove(); document.removeEventListener('click', close); } };
+  setTimeout(() => document.addEventListener('click', close), 0);
+}
+
+function switchToRoom(roomId) {
+  if (roomId === currentRoomId) return;
+  socket.emit('switch-room', { roomId });
+  collapseRailSections();
+}
+
+function renderNotiList() {
+  const list = $('noti-list');
+  list.innerHTML = '';
+  if (!notificationsList.length) {
+    list.innerHTML = '<div class="noti-empty">No notifications</div>';
+    updateNotiBadge();
+    return;
+  }
+  notificationsList.forEach(n => {
+    const row = document.createElement('div');
+    row.className = 'noti-row' + (n.read ? '' : ' unread');
+
+    const text = document.createElement('div');
+    text.className = 'noti-row-text';
+    if (n.type === 'join-request') {
+      text.innerHTML = `<b>${escapeHtml(n.fromName)}</b> wants to join <b>${escapeHtml(n.roomName)}</b> ${escapeHtml(n.roomIcon||'')}`;
+    } else if (n.type === 'join-approved') {
+      text.innerHTML = `You were approved to join <b>${escapeHtml(n.roomName)}</b> ${escapeHtml(n.roomIcon||'')}`;
+    } else if (n.type === 'join-denied') {
+      text.innerHTML = `Your request to join <b>${escapeHtml(n.roomName)}</b> was declined`;
+    } else if (n.type === 'room-invite') {
+      text.innerHTML = `<b>${escapeHtml(n.fromName)}</b> invited you to join <b>${escapeHtml(n.roomName)}</b> ${escapeHtml(n.roomIcon||'')}`;
+    } else if (n.type === 'coadmin-invite') {
+      text.innerHTML = `<b>${escapeHtml(n.fromName)}</b> wants to make you co-admin of <b>${escapeHtml(n.roomName)}</b> ${escapeHtml(n.roomIcon||'')}`;
+    } else if (n.type === 'invite-accepted') {
+      text.innerHTML = `<b>${escapeHtml(n.fromName)}</b> accepted your invite to <b>${escapeHtml(n.roomName)}</b>`;
+    } else {
+      text.textContent = n.text || '';
+    }
+    row.appendChild(text);
+
+    const time = document.createElement('div');
+    time.className = 'noti-row-time';
+    time.textContent = timeAgoShort(n.ts);
+    row.appendChild(time);
+
+    const actionable = n.type === 'join-request' || n.type === 'room-invite' || n.type === 'coadmin-invite';
+    if (actionable) {
+      const actions = document.createElement('div');
+      actions.className = 'noti-row-actions';
+      const accept = document.createElement('button');
+      accept.className = 'noti-accept-btn'; accept.textContent = 'Accept';
+      accept.addEventListener('click', () => {
+        if (n.type === 'join-request') {
+          socket.emit('respond-join', { roomId: n.roomId, requesterClientId: n.fromClientId, approve: true });
+        } else {
+          socket.emit('respond-invite', { roomId: n.roomId, approve: true, coAdmin: n.type === 'coadmin-invite' });
+        }
+        socket.emit('mark-notification-read', { id: n.id });
+        n.read = true; renderNotiList();
+      });
+      const deny = document.createElement('button');
+      deny.className = 'noti-deny-btn'; deny.textContent = 'Deny';
+      deny.addEventListener('click', () => {
+        if (n.type === 'join-request') {
+          socket.emit('respond-join', { roomId: n.roomId, requesterClientId: n.fromClientId, approve: false });
+        } else {
+          socket.emit('respond-invite', { roomId: n.roomId, approve: false, coAdmin: n.type === 'coadmin-invite' });
+        }
+        socket.emit('mark-notification-read', { id: n.id });
+        n.read = true; renderNotiList();
+      });
+      actions.appendChild(accept); actions.appendChild(deny);
+      row.appendChild(actions);
+    } else if (!n.read) {
+      row.addEventListener('click', () => { socket.emit('mark-notification-read', { id: n.id }); n.read = true; renderNotiList(); });
+    }
+
+    list.appendChild(row);
+  });
+  updateNotiBadge();
+}
+
+function updateNotiBadge() {
+  const hasUnread = notificationsList.some(n => !n.read);
+  $('rail-noti-badge').hidden = !hasUnread;
+}
+
+let roomSearchTimer = null;
+async function runRoomSearch(q) {
+  try {
+    const [roomsRes, peopleRes] = await Promise.all([
+      fetch('/api/rooms/search?q=' + encodeURIComponent(q)),
+      fetch('/api/people/search?q=' + encodeURIComponent(q)),
+    ]);
+    const rooms = await roomsRes.json();
+    const people = await peopleRes.json();
+    renderRoomSearchResults(rooms, people);
+  } catch { renderRoomSearchResults([], []); }
+}
+function renderRoomSearchResults(rooms, people) {
+  const box = $('room-search-results');
+  box.innerHTML = '';
+  const myIds = new Set(myRooms.map(r => r.id));
+  const roomResults = (rooms || []).filter(r => !myIds.has(r.id));
+  const peopleResults = (people || []).filter(p => p.name.toLowerCase() !== myName.toLowerCase());
+  const canInvite = !!currentRoomInfo.isPrivileged;
+
+  if (!roomResults.length && !peopleResults.length) {
+    box.innerHTML = '<div class="room-search-empty">No matches found</div>';
+    return;
+  }
+
+  if (roomResults.length) {
+    const label = document.createElement('div');
+    label.className = 'search-group-label'; label.textContent = 'Rooms';
+    box.appendChild(label);
+    roomResults.forEach(r => {
+      const row = document.createElement('div');
+      row.className = 'room-search-row';
+
+      const icon = document.createElement('span');
+      icon.className = 'room-search-row-icon'; icon.textContent = r.icon || '💬';
+      row.appendChild(icon);
+
+      const info = document.createElement('div');
+      info.className = 'room-search-row-info';
+      const name = document.createElement('div');
+      name.className = 'room-search-row-name'; name.textContent = r.name;
+      const meta = document.createElement('div');
+      meta.className = 'room-search-row-meta'; meta.textContent = `${r.memberCount} member${r.memberCount===1?'':'s'}`;
+      info.appendChild(name); info.appendChild(meta);
+      row.appendChild(info);
+
+      const btn = document.createElement('button');
+      btn.className = 'room-search-join-btn'; btn.textContent = 'Ask to join';
+      btn.addEventListener('click', () => {
+        socket.emit('request-join', { roomId: r.id });
+        btn.textContent = 'Requested'; btn.disabled = true;
+      });
+      row.appendChild(btn);
+
+      box.appendChild(row);
+    });
+  }
+
+  if (peopleResults.length) {
+    const label = document.createElement('div');
+    label.className = 'search-group-label'; label.textContent = 'People';
+    box.appendChild(label);
+    peopleResults.forEach(p => {
+      const row = document.createElement('div');
+      row.className = 'room-search-row';
+
+      const icon = document.createElement('span');
+      icon.className = 'room-search-row-icon'; icon.textContent = '👤';
+      row.appendChild(icon);
+
+      const info = document.createElement('div');
+      info.className = 'room-search-row-info';
+      const name = document.createElement('div');
+      name.className = 'room-search-row-name'; name.textContent = p.name;
+      info.appendChild(name);
+      row.appendChild(info);
+
+      if (canInvite) {
+        const inviteBtn = document.createElement('button');
+        inviteBtn.className = 'room-search-join-btn'; inviteBtn.textContent = 'Invite';
+        inviteBtn.title = `Invite to ${currentRoomInfo.name}`;
+        inviteBtn.addEventListener('click', () => {
+          socket.emit('invite-to-room', { roomId: currentRoomId, name: p.name, asCoAdmin: false });
+          inviteBtn.textContent = 'Invited'; inviteBtn.disabled = true;
+        });
+        row.appendChild(inviteBtn);
+
+        const coBtn = document.createElement('button');
+        coBtn.className = 'room-search-join-btn co'; coBtn.textContent = '+Co-admin';
+        coBtn.title = `Invite as co-admin of ${currentRoomInfo.name}`;
+        coBtn.addEventListener('click', () => {
+          socket.emit('invite-to-room', { roomId: currentRoomId, name: p.name, asCoAdmin: true });
+          coBtn.textContent = 'Requested'; coBtn.disabled = true;
+        });
+        row.appendChild(coBtn);
+      }
+
+      box.appendChild(row);
+    });
+  }
+}
+
+socket.on('my-rooms', list => {
+  myRooms = list;
+  const mine = myRooms.find(r => r.id === currentRoomId);
+  if (mine) currentRoomInfo = mine;
+  renderRoomList();
+  updateCurrentRoomLabel();
+});
+socket.on('notifications', list => { notificationsList = list; renderNotiList(); });
+socket.on('notification', n => { notificationsList.unshift(n); renderNotiList(); showToast(
+  n.type === 'join-request' ? `${n.fromName} wants to join ${n.roomName}` :
+  n.type === 'join-approved' ? `You're in — ${n.roomName}` :
+  n.type === 'join-denied' ? `Request to join ${n.roomName} was declined` : 'New notification'
+); });
+socket.on('room-created', room => {
+  showToast(`Room "${room.name}" created — you're the admin`);
+  switchToRoom(room.id);
+});
+socket.on('room-updated', room => {
+  const idx = myRooms.findIndex(r => r.id === room.id);
+  if (idx !== -1) myRooms[idx] = room; else myRooms.push(room);
+  if (room.id === currentRoomId) currentRoomInfo = room;
+  renderRoomList();
+  updateCurrentRoomLabel();
+});
+socket.on('room-history', ({ roomId, msgs, hasMore, room }) => {
+  currentRoomId = roomId;
+  currentRoomInfo = room;
+  $('messages').innerHTML = '';
+  lastGroupEl = null; lastGroupUser = null; lastDateKey = '';
+  const hidden = getHiddenIds();
+  msgs.forEach(m => {
+    allMessages.set(m.id, m);
+    if (!hidden.has(m.id)) addMessage(m, m.user === myName, true);
+  });
+  oldestTs = msgs.length ? msgs[0].ts : null;
+  hasMoreHistory = hasMore;
+  renderLoadMoreRow();
+  $('messages').scrollTop = $('messages').scrollHeight;
+  updateCurrentRoomLabel();
+  renderRoomList();
+  clearUnread();
+});
+socket.on('info-msg', msg => showToast(msg));
+
+/* ── sidebar rail interactions ── */
+function collapseRailSections() {
+  document.querySelectorAll('.rail-section.section-expanded').forEach(s => s.classList.remove('section-expanded'));
+  $('side-rail').classList.remove('pinned');
+}
+function toggleRailSection(name) {
+  const section = document.querySelector(`.rail-section[data-section="${name}"]`);
+  const isOpen = section.classList.contains('section-expanded');
+  collapseRailSections();
+  if (!isOpen) {
+    section.classList.add('section-expanded');
+    $('side-rail').classList.add('pinned');
+  }
+}
+$('rail-notis-btn').addEventListener('click', () => toggleRailSection('notis'));
+$('rail-rooms-btn').addEventListener('click', () => toggleRailSection('rooms'));
+$('rail-search-btn').addEventListener('click', () => { toggleRailSection('roomsearch'); runRoomSearch(''); });
+
+$('create-room-btn').addEventListener('click', () => {
+  $('create-room-form').classList.toggle('hidden');
+  if (!$('create-room-form').classList.contains('hidden')) $('create-room-input').focus();
+});
+function submitCreateRoom() {
+  const val = $('create-room-input').value.trim();
+  if (!val) return;
+  socket.emit('create-room', { name: val });
+  $('create-room-input').value = '';
+  $('create-room-form').classList.add('hidden');
+}
+$('create-room-submit').addEventListener('click', submitCreateRoom);
+$('create-room-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitCreateRoom(); });
+
+$('room-search-input').addEventListener('input', e => {
+  clearTimeout(roomSearchTimer);
+  const q = e.target.value;
+  roomSearchTimer = setTimeout(() => runRoomSearch(q), 250);
+});
+
+document.addEventListener('click', e => {
+  if (!$('side-rail').contains(e.target)) collapseRailSections();
+});
+
+/* ── mobile rail toggle ── */
+function openMobileRail() {
+  $('side-rail').classList.add('mobile-open');
+  $('rail-backdrop').classList.add('show');
+}
+function closeMobileRail() {
+  $('side-rail').classList.remove('mobile-open');
+  $('rail-backdrop').classList.remove('show');
+  collapseRailSections();
+}
+$('rail-toggle-btn').addEventListener('click', () => {
+  $('side-rail').classList.contains('mobile-open') ? closeMobileRail() : openMobileRail();
+});
+$('rail-backdrop').addEventListener('click', closeMobileRail);

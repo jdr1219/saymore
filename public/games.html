@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover"/>
+<title>Glass Games</title>
+<link rel="icon" id="icon-ico" type="image/x-icon" href="favicon.ico"/>
+<link rel="icon" id="icon-32" type="image/png" sizes="32x32" href="favicon-32.png"/>
+<link rel="apple-touch-icon" id="apple-touch" sizes="180x180" href="apple-touch-icon.png"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="style.css"/>
+<link rel="stylesheet" href="games.css"/>
+</head>
+<body>
+
+<div id="bg"></div>
+
+<div class="screen">
+  <div class="glass chat-card games-card">
+    <header class="chat-header">
+      <div class="header-left">
+        <a class="icon-btn" href="index.html" title="Back to Glass Chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </a>
+        <img class="header-logo" src="games-icon-48.png" alt=""/>
+        <span class="header-title">Glass Games</span>
+      </div>
+      <div class="header-right"></div>
+    </header>
+
+    <div class="games-body" id="games-body">
+      <input type="text" id="games-search" class="games-search-input" placeholder="Search games..." autocomplete="off"/>
+      <div id="games-results"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vanta@0.5.24/dist/vanta.fog.min.js"></script>
+<script src="themes-data.js"></script>
+<script src="games-theme.js"></script>
+<script src="games.js"></script>
+
+</body>
+</html>
