@@ -4,6 +4,7 @@
    only the content area (the bubble menu) is new. */
 
 .games-card { display: flex; flex-direction: column; }
+.games-header-logo { height: 30px; width: auto; object-fit: contain; border-radius: 0; box-shadow: none; }
 
 .games-body {
   flex: 1;

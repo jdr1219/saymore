@@ -1,5 +1,5 @@
-/* ════════ Glass Games — bubble menu ════════ */
-const $ = id => document.getElementById(id);
+/* ════════ Glass Games — bubble menu ════════
+   $ is declared in sidebar.js, which loads before this file. */
 
 function rand(min, max) { return min + Math.random() * (max - min); }
 

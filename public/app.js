@@ -1,7 +1,7 @@
-/* ════════ Glass Chat — client ════════ */
-const socket = io();
-
-const $ = id => document.getElementById(id);
+/* ════════ Glass Chat — client ════════
+   socket, $, escapeHtml are declared in sidebar.js, which loads
+   before this file (see index.html) so both files share them. */
+window.__isChatPage = true;
 
 /* THEMES, THEME_VAR_MAP, and getTheme() now live in themes-data.js
    (shared with Glass Games and any future page) — loaded via a
@@ -176,18 +176,14 @@ let lastDateKey = '';
 const GROUP_GAP = 60000;
 const AV_COLORS = ['#3fa9e0','#1f7fc9','#5ab3e6','#2f8fd4','#6cc2ec','#1a6bb8'];
 const REACTION_SET = ['👍','❤️','😂','😮','😢','🙏'];
-const ROOM_ICON_SET = ['🫧','💬','🎮','🎲','🎧','📚','🎨','🍕','☕','🌙','⚡','🔥','🌊','🐝','🎬','⭐'];
 
-/* ── rooms / sidebar state ── */
-let currentRoomId = 'general';
-let currentRoomInfo = { id: 'general', name: 'General', icon: '💬', isDefault: true, isAdmin: false };
-let myRooms = [];
-let notificationsList = [];
+/* currentRoomId, currentRoomInfo, myRooms, notificationsList are
+   declared in sidebar.js. roomOf() stays here since it needs
+   allMessages, which is chat-page-only. */
 function roomOf(msgId) { return allMessages.get(msgId)?.roomId || currentRoomId; }
 
 const userColor = n => { let h=0; for (const c of n) h=(h*31+c.charCodeAt(0))&0xffff; return AV_COLORS[h%AV_COLORS.length]; };
 const fmtTime = ts => new Date(ts||Date.now()).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-const escapeHtml = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
 function dateKey(ts) { return new Date(ts).toDateString(); }
 function dateLabel(ts) {
@@ -256,20 +252,7 @@ function ripple(x,y){
   document.body.appendChild(r);
   setTimeout(()=>r.remove(),520);
 }
-
-let toastTimer = null;
-function showToast(msg) {
-  let t = document.getElementById('gc-toast');
-  if (!t) {
-    t = document.createElement('div');
-    t.id = 'gc-toast'; t.className = 'gc-toast';
-    document.body.appendChild(t);
-  }
-  t.textContent = msg;
-  clearTimeout(toastTimer);
-  requestAnimationFrame(() => t.classList.add('show'));
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
-}
+/* showToast() is declared in sidebar.js */
 
 /* ── notification sound: soft two-note chime, gentle attack/decay ── */
 let actx = null;
@@ -486,10 +469,19 @@ socket.on('error-msg', msg => {
 socket.on('join-success', () => {
   $('join-btn').disabled = false;
   updateHeaderProfile();
+  const goToRoom = () => {
+    const params = new URLSearchParams(location.search);
+    const room = params.get('room');
+    if (room) {
+      socket.emit('switch-room', { roomId: room });
+      history.replaceState(null, '', location.pathname); // drop ?room= from the URL bar
+    }
+  };
   if (!$('chat-screen').classList.contains('hidden')) {
     // already showing chat (returning-profile flow went straight in)
     hasJoinedOnce ? hideReconnectBanner() : ($('msg-input').focus());
     hasJoinedOnce = true;
+    goToRoom();
   } else {
     // first-time welcome/setup flow — animate the setup card away
     hasJoinedOnce = true;
@@ -498,6 +490,7 @@ socket.on('join-success', () => {
       $('login-screen').classList.add('hidden');
       $('chat-screen').classList.remove('hidden');
       $('msg-input').focus();
+      goToRoom();
     }, 280);
   }
 });
@@ -1382,347 +1375,10 @@ socket.on('connect', () => {
   }
 });
 
-/* ════════════════════════════════════════════════
-   ROOMS + NOTIFICATIONS SIDEBAR
-════════════════════════════════════════════════ */
-function timeAgoShort(ts) {
-  const s = Math.floor((Date.now() - ts) / 1000);
-  if (s < 60) return 'now';
-  if (s < 3600) return `${Math.floor(s/60)}m`;
-  if (s < 86400) return `${Math.floor(s/3600)}h`;
-  return `${Math.floor(s/86400)}d`;
-}
-
-function updateCurrentRoomLabel() {
-  $('current-room-icon').textContent = currentRoomInfo.icon || '💬';
-  $('current-room-name').textContent = currentRoomInfo.name || 'General';
-  $('current-room-label').title = currentRoomInfo.isAdmin ? `${currentRoomInfo.name} — you're the admin` : currentRoomInfo.name;
-}
-
-function renderRoomList() {
-  const list = $('room-list');
-  list.innerHTML = '';
-  if (!myRooms.length) {
-    list.innerHTML = '<div class="room-list-empty">No rooms yet</div>';
-    return;
-  }
-  myRooms.forEach(room => {
-    const row = document.createElement('div');
-    row.className = 'room-row' + (room.id === currentRoomId ? ' active' : '');
-    row.dataset.roomId = room.id;
-
-    const icon = document.createElement('span');
-    icon.className = 'room-row-icon';
-    icon.textContent = room.icon || '💬';
-    row.appendChild(icon);
-
-    const name = document.createElement('span');
-    name.className = 'room-row-name';
-    name.textContent = room.name;
-    row.appendChild(name);
-
-    if (room.isAdmin || room.isCoAdmin) {
-      const badge = document.createElement('span');
-      badge.className = 'room-row-admin-badge';
-      badge.textContent = room.isAdmin ? 'ADMIN' : 'CO-ADMIN';
-      row.appendChild(badge);
-
-      const membersBtn = document.createElement('button');
-      membersBtn.className = 'room-row-icon-edit';
-      membersBtn.title = 'Members';
-      membersBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
-      membersBtn.addEventListener('click', e => { e.stopPropagation(); openMemberPopup(room, membersBtn); });
-      row.appendChild(membersBtn);
-
-      const editBtn = document.createElement('button');
-      editBtn.className = 'room-row-icon-edit';
-      editBtn.title = 'Change room icon';
-      editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-      editBtn.addEventListener('click', e => { e.stopPropagation(); openIconPicker(room.id, editBtn); });
-      row.appendChild(editBtn);
-    }
-
-    row.addEventListener('click', () => switchToRoom(room.id));
-    list.appendChild(row);
-  });
-}
-
-function openIconPicker(roomId, anchorEl) {
-  document.querySelectorAll('.icon-picker, .member-popup').forEach(p => p.remove());
-  const picker = document.createElement('div');
-  picker.className = 'icon-picker';
-  ROOM_ICON_SET.forEach(icon => {
-    const b = document.createElement('button');
-    b.textContent = icon;
-    b.addEventListener('click', () => { socket.emit('set-room-icon', { roomId, icon }); picker.remove(); });
-    picker.appendChild(b);
-  });
-  document.body.appendChild(picker);
-  const r = anchorEl.getBoundingClientRect();
-  picker.style.top = (r.bottom + 6) + 'px';
-  picker.style.left = Math.min(r.left, window.innerWidth - 160) + 'px';
-  const close = ev => { if (!picker.contains(ev.target) && ev.target !== anchorEl) { picker.remove(); document.removeEventListener('click', close); } };
-  setTimeout(() => document.addEventListener('click', close), 0);
-}
-
-/* Member roster for a room you administer/co-admin — lets you promote
-   an existing member to co-admin (a request they still have to accept). */
-function openMemberPopup(room, anchorEl) {
-  document.querySelectorAll('.icon-picker, .member-popup').forEach(p => p.remove());
-  const pop = document.createElement('div');
-  pop.className = 'member-popup';
-  const title = document.createElement('div');
-  title.className = 'member-popup-title';
-  title.textContent = `${room.name} members`;
-  pop.appendChild(title);
-
-  const members = room.members || [];
-  if (!members.length) {
-    const empty = document.createElement('div');
-    empty.className = 'member-popup-empty'; empty.textContent = 'No members yet';
-    pop.appendChild(empty);
-  }
-  members.forEach(m => {
-    const row = document.createElement('div');
-    row.className = 'member-popup-row';
-    const name = document.createElement('span');
-    name.className = 'member-popup-name';
-    name.textContent = m.name + (m.role !== 'member' ? ` · ${m.role}` : '');
-    row.appendChild(name);
-    if (m.role === 'member' && m.name.toLowerCase() !== myName.toLowerCase()) {
-      const btn = document.createElement('button');
-      btn.className = 'member-popup-promote';
-      btn.textContent = 'Make co-admin';
-      btn.addEventListener('click', () => {
-        socket.emit('invite-to-room', { roomId: room.id, name: m.name, asCoAdmin: true });
-        btn.textContent = 'Requested'; btn.disabled = true;
-      });
-      row.appendChild(btn);
-    }
-    pop.appendChild(row);
-  });
-
-  document.body.appendChild(pop);
-  const r = anchorEl.getBoundingClientRect();
-  pop.style.top = (r.bottom + 6) + 'px';
-  pop.style.left = Math.min(r.left, window.innerWidth - 230) + 'px';
-  const close = ev => { if (!pop.contains(ev.target) && ev.target !== anchorEl) { pop.remove(); document.removeEventListener('click', close); } };
-  setTimeout(() => document.addEventListener('click', close), 0);
-}
-
-function switchToRoom(roomId) {
-  if (roomId === currentRoomId) return;
-  socket.emit('switch-room', { roomId });
-  collapseRailSections();
-}
-
-function renderNotiList() {
-  const list = $('noti-list');
-  list.innerHTML = '';
-  if (!notificationsList.length) {
-    list.innerHTML = '<div class="noti-empty">No notifications</div>';
-    updateNotiBadge();
-    return;
-  }
-  notificationsList.forEach(n => {
-    const row = document.createElement('div');
-    row.className = 'noti-row' + (n.read ? '' : ' unread');
-
-    const text = document.createElement('div');
-    text.className = 'noti-row-text';
-    if (n.type === 'join-request') {
-      text.innerHTML = `<b>${escapeHtml(n.fromName)}</b> wants to join <b>${escapeHtml(n.roomName)}</b> ${escapeHtml(n.roomIcon||'')}`;
-    } else if (n.type === 'join-approved') {
-      text.innerHTML = `You were approved to join <b>${escapeHtml(n.roomName)}</b> ${escapeHtml(n.roomIcon||'')}`;
-    } else if (n.type === 'join-denied') {
-      text.innerHTML = `Your request to join <b>${escapeHtml(n.roomName)}</b> was declined`;
-    } else if (n.type === 'room-invite') {
-      text.innerHTML = `<b>${escapeHtml(n.fromName)}</b> invited you to join <b>${escapeHtml(n.roomName)}</b> ${escapeHtml(n.roomIcon||'')}`;
-    } else if (n.type === 'coadmin-invite') {
-      text.innerHTML = `<b>${escapeHtml(n.fromName)}</b> wants to make you co-admin of <b>${escapeHtml(n.roomName)}</b> ${escapeHtml(n.roomIcon||'')}`;
-    } else if (n.type === 'invite-accepted') {
-      text.innerHTML = `<b>${escapeHtml(n.fromName)}</b> accepted your invite to <b>${escapeHtml(n.roomName)}</b>`;
-    } else {
-      text.textContent = n.text || '';
-    }
-    row.appendChild(text);
-
-    const time = document.createElement('div');
-    time.className = 'noti-row-time';
-    time.textContent = timeAgoShort(n.ts);
-    row.appendChild(time);
-
-    const actionable = n.type === 'join-request' || n.type === 'room-invite' || n.type === 'coadmin-invite';
-    if (actionable) {
-      const actions = document.createElement('div');
-      actions.className = 'noti-row-actions';
-      const accept = document.createElement('button');
-      accept.className = 'noti-accept-btn'; accept.textContent = 'Accept';
-      accept.addEventListener('click', () => {
-        if (n.type === 'join-request') {
-          socket.emit('respond-join', { roomId: n.roomId, requesterClientId: n.fromClientId, approve: true });
-        } else {
-          socket.emit('respond-invite', { roomId: n.roomId, approve: true, coAdmin: n.type === 'coadmin-invite' });
-        }
-        socket.emit('mark-notification-read', { id: n.id });
-        n.read = true; renderNotiList();
-      });
-      const deny = document.createElement('button');
-      deny.className = 'noti-deny-btn'; deny.textContent = 'Deny';
-      deny.addEventListener('click', () => {
-        if (n.type === 'join-request') {
-          socket.emit('respond-join', { roomId: n.roomId, requesterClientId: n.fromClientId, approve: false });
-        } else {
-          socket.emit('respond-invite', { roomId: n.roomId, approve: false, coAdmin: n.type === 'coadmin-invite' });
-        }
-        socket.emit('mark-notification-read', { id: n.id });
-        n.read = true; renderNotiList();
-      });
-      actions.appendChild(accept); actions.appendChild(deny);
-      row.appendChild(actions);
-    } else if (!n.read) {
-      row.addEventListener('click', () => { socket.emit('mark-notification-read', { id: n.id }); n.read = true; renderNotiList(); });
-    }
-
-    list.appendChild(row);
-  });
-  updateNotiBadge();
-}
-
-function updateNotiBadge() {
-  const hasUnread = notificationsList.some(n => !n.read);
-  $('rail-noti-badge').hidden = !hasUnread;
-}
-
-let roomSearchTimer = null;
-async function runRoomSearch(q) {
-  try {
-    const [roomsRes, peopleRes] = await Promise.all([
-      fetch('/api/rooms/search?q=' + encodeURIComponent(q)),
-      fetch('/api/people/search?q=' + encodeURIComponent(q)),
-    ]);
-    const rooms = await roomsRes.json();
-    const people = await peopleRes.json();
-    renderRoomSearchResults(rooms, people);
-  } catch { renderRoomSearchResults([], []); }
-}
-function renderRoomSearchResults(rooms, people) {
-  const box = $('room-search-results');
-  box.innerHTML = '';
-  const myIds = new Set(myRooms.map(r => r.id));
-  const roomResults = (rooms || []).filter(r => !myIds.has(r.id));
-  const peopleResults = (people || []).filter(p => p.name.toLowerCase() !== myName.toLowerCase());
-  const canInvite = !!currentRoomInfo.isPrivileged;
-
-  if (!roomResults.length && !peopleResults.length) {
-    box.innerHTML = '<div class="room-search-empty">No matches found</div>';
-    return;
-  }
-
-  if (roomResults.length) {
-    const label = document.createElement('div');
-    label.className = 'search-group-label'; label.textContent = 'Rooms';
-    box.appendChild(label);
-    roomResults.forEach(r => {
-      const row = document.createElement('div');
-      row.className = 'room-search-row';
-
-      const icon = document.createElement('span');
-      icon.className = 'room-search-row-icon'; icon.textContent = r.icon || '💬';
-      row.appendChild(icon);
-
-      const info = document.createElement('div');
-      info.className = 'room-search-row-info';
-      const name = document.createElement('div');
-      name.className = 'room-search-row-name'; name.textContent = r.name;
-      const meta = document.createElement('div');
-      meta.className = 'room-search-row-meta'; meta.textContent = `${r.memberCount} member${r.memberCount===1?'':'s'}`;
-      info.appendChild(name); info.appendChild(meta);
-      row.appendChild(info);
-
-      const btn = document.createElement('button');
-      btn.className = 'room-search-join-btn'; btn.textContent = 'Ask to join';
-      btn.addEventListener('click', () => {
-        socket.emit('request-join', { roomId: r.id });
-        btn.textContent = 'Requested'; btn.disabled = true;
-      });
-      row.appendChild(btn);
-
-      box.appendChild(row);
-    });
-  }
-
-  if (peopleResults.length) {
-    const label = document.createElement('div');
-    label.className = 'search-group-label'; label.textContent = 'People';
-    box.appendChild(label);
-    peopleResults.forEach(p => {
-      const row = document.createElement('div');
-      row.className = 'room-search-row';
-
-      const icon = document.createElement('span');
-      icon.className = 'room-search-row-icon'; icon.textContent = '👤';
-      row.appendChild(icon);
-
-      const info = document.createElement('div');
-      info.className = 'room-search-row-info';
-      const name = document.createElement('div');
-      name.className = 'room-search-row-name'; name.textContent = p.name;
-      info.appendChild(name);
-      row.appendChild(info);
-
-      if (canInvite) {
-        const inviteBtn = document.createElement('button');
-        inviteBtn.className = 'room-search-join-btn'; inviteBtn.textContent = 'Invite';
-        inviteBtn.title = `Invite to ${currentRoomInfo.name}`;
-        inviteBtn.addEventListener('click', () => {
-          socket.emit('invite-to-room', { roomId: currentRoomId, name: p.name, asCoAdmin: false });
-          inviteBtn.textContent = 'Invited'; inviteBtn.disabled = true;
-        });
-        row.appendChild(inviteBtn);
-
-        const coBtn = document.createElement('button');
-        coBtn.className = 'room-search-join-btn co'; coBtn.textContent = '+Co-admin';
-        coBtn.title = `Invite as co-admin of ${currentRoomInfo.name}`;
-        coBtn.addEventListener('click', () => {
-          socket.emit('invite-to-room', { roomId: currentRoomId, name: p.name, asCoAdmin: true });
-          coBtn.textContent = 'Requested'; coBtn.disabled = true;
-        });
-        row.appendChild(coBtn);
-      }
-
-      box.appendChild(row);
-    });
-  }
-}
-
-socket.on('my-rooms', list => {
-  myRooms = list;
-  const mine = myRooms.find(r => r.id === currentRoomId);
-  if (mine) currentRoomInfo = mine;
-  renderRoomList();
-  updateCurrentRoomLabel();
-});
-socket.on('notifications', list => { notificationsList = list; renderNotiList(); });
-socket.on('notification', n => { notificationsList.unshift(n); renderNotiList(); showToast(
-  n.type === 'join-request' ? `${n.fromName} wants to join ${n.roomName}` :
-  n.type === 'join-approved' ? `You're in — ${n.roomName}` :
-  n.type === 'join-denied' ? `Request to join ${n.roomName} was declined` : 'New notification'
-); });
-socket.on('room-created', room => {
-  showToast(`Room "${room.name}" created — you're the admin`);
-  switchToRoom(room.id);
-});
-socket.on('room-updated', room => {
-  const idx = myRooms.findIndex(r => r.id === room.id);
-  if (idx !== -1) myRooms[idx] = room; else myRooms.push(room);
-  if (room.id === currentRoomId) currentRoomInfo = room;
-  renderRoomList();
-  updateCurrentRoomLabel();
-});
-socket.on('room-history', ({ roomId, msgs, hasMore, room }) => {
-  currentRoomId = roomId;
-  currentRoomInfo = room;
+/* room-history is also handled by sidebar.js (which updates
+   currentRoomId/currentRoomInfo/the room list) — this listener just
+   handles repopulating the message pane for the newly active room. */
+socket.on('room-history', ({ msgs, hasMore }) => {
   $('messages').innerHTML = '';
   lastGroupEl = null; lastGroupUser = null; lastDateKey = '';
   const hidden = getHiddenIds();
@@ -1734,65 +1390,5 @@ socket.on('room-history', ({ roomId, msgs, hasMore, room }) => {
   hasMoreHistory = hasMore;
   renderLoadMoreRow();
   $('messages').scrollTop = $('messages').scrollHeight;
-  updateCurrentRoomLabel();
-  renderRoomList();
   clearUnread();
 });
-socket.on('info-msg', msg => showToast(msg));
-
-/* ── sidebar rail interactions ── */
-function collapseRailSections() {
-  document.querySelectorAll('.rail-section.section-expanded').forEach(s => s.classList.remove('section-expanded'));
-  $('side-rail').classList.remove('pinned');
-}
-function toggleRailSection(name) {
-  const section = document.querySelector(`.rail-section[data-section="${name}"]`);
-  const isOpen = section.classList.contains('section-expanded');
-  collapseRailSections();
-  if (!isOpen) {
-    section.classList.add('section-expanded');
-    $('side-rail').classList.add('pinned');
-  }
-}
-$('rail-notis-btn').addEventListener('click', () => toggleRailSection('notis'));
-$('rail-rooms-btn').addEventListener('click', () => toggleRailSection('rooms'));
-$('rail-search-btn').addEventListener('click', () => { toggleRailSection('roomsearch'); runRoomSearch(''); });
-
-$('create-room-btn').addEventListener('click', () => {
-  $('create-room-form').classList.toggle('hidden');
-  if (!$('create-room-form').classList.contains('hidden')) $('create-room-input').focus();
-});
-function submitCreateRoom() {
-  const val = $('create-room-input').value.trim();
-  if (!val) return;
-  socket.emit('create-room', { name: val });
-  $('create-room-input').value = '';
-  $('create-room-form').classList.add('hidden');
-}
-$('create-room-submit').addEventListener('click', submitCreateRoom);
-$('create-room-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitCreateRoom(); });
-
-$('room-search-input').addEventListener('input', e => {
-  clearTimeout(roomSearchTimer);
-  const q = e.target.value;
-  roomSearchTimer = setTimeout(() => runRoomSearch(q), 250);
-});
-
-document.addEventListener('click', e => {
-  if (!$('side-rail').contains(e.target)) collapseRailSections();
-});
-
-/* ── mobile rail toggle ── */
-function openMobileRail() {
-  $('side-rail').classList.add('mobile-open');
-  $('rail-backdrop').classList.add('show');
-}
-function closeMobileRail() {
-  $('side-rail').classList.remove('mobile-open');
-  $('rail-backdrop').classList.remove('show');
-  collapseRailSections();
-}
-$('rail-toggle-btn').addEventListener('click', () => {
-  $('side-rail').classList.contains('mobile-open') ? closeMobileRail() : openMobileRail();
-});
-$('rail-backdrop').addEventListener('click', closeMobileRail);

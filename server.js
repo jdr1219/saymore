@@ -262,6 +262,23 @@ function isPrivileged(room, clientId) {
   if (room.adminClientId === clientId) return true;
   return (room.coAdmins || []).some(m => m.clientId === clientId);
 }
+function isBanned(room, clientId) {
+  if (!room || !clientId || !room.bans) return false;
+  room.bans = room.bans.filter(b => b.until > Date.now()); // prune expired as we go
+  return room.bans.some(b => b.clientId === clientId);
+}
+/* Who can kick/ban/promote whom: the admin can act on anyone but
+   themself; a co-admin can act on regular members only (not the
+   admin, not other co-admins, not themself). */
+function canModerate(room, actorClientId, targetClientId) {
+  if (!room || actorClientId === targetClientId) return false;
+  if (room.adminClientId === actorClientId) return targetClientId !== room.adminClientId;
+  const actorIsCoAdmin = (room.coAdmins || []).some(c => c.clientId === actorClientId);
+  if (!actorIsCoAdmin) return false;
+  if (targetClientId === room.adminClientId) return false;
+  if ((room.coAdmins || []).some(c => c.clientId === targetClientId)) return false;
+  return true;
+}
 function publicRoomInfo(room, viewerClientId) {
   const isAdmin = room.adminClientId === viewerClientId;
   const isCoAdmin = (room.coAdmins || []).some(m => m.clientId === viewerClientId);
@@ -271,6 +288,7 @@ function publicRoomInfo(room, viewerClientId) {
     adminName: room.adminName, isAdmin, isCoAdmin, isPrivileged: privileged,
     memberCount: room.members.length,
     pendingRequests: privileged ? room.pendingRequests : [],
+    bans: privileged ? (room.bans || []).map(b => ({ name: b.name, until: b.until })) : [],
     members: privileged ? room.members.map(m => ({
       clientId: m.clientId, name: m.name,
       role: m.clientId === room.adminClientId ? "admin" : (room.coAdmins || []).some(c => c.clientId === m.clientId) ? "co-admin" : "member",
@@ -481,7 +499,7 @@ io.on("connection", socket => {
       id, name: cleanName, icon: "🫧",
       adminClientId: u.clientId, adminName: u.name,
       members: [{ clientId: u.clientId, name: u.name }],
-      coAdmins: [],
+      coAdmins: [], bans: [],
       pendingRequests: [], createdAt: Date.now(),
     };
     rooms[id] = room;
@@ -526,6 +544,7 @@ io.on("connection", socket => {
     const u = users[socket.id]; if (!u) return;
     const room = rooms[cleanId(roomId)]; if (!room) return socket.emit("error-msg", "Room not found");
     if (isMember(room, u.clientId)) return socket.emit("error-msg", "You're already in that room");
+    if (isBanned(room, u.clientId)) return socket.emit("error-msg", "You can't join this room right now");
     if (room.pendingRequests.some(p => p.clientId === u.clientId)) return socket.emit("error-msg", "Request already sent");
 
     room.pendingRequests.push({ clientId: u.clientId, name: u.name, ts: Date.now() });
@@ -580,6 +599,7 @@ io.on("connection", socket => {
 
     const targetClientId = findClientIdByName(targetName);
     if (!targetClientId) return socket.emit("error-msg", "Couldn't find that person");
+    if (isBanned(room, targetClientId)) return socket.emit("error-msg", `${targetName} is banned from that room`);
     if (asCoAdmin && room.coAdmins.some(c => c.clientId === targetClientId)) return socket.emit("error-msg", `${targetName} is already a co-admin`);
     if (!asCoAdmin && isMember(room, targetClientId)) return socket.emit("error-msg", `${targetName} is already in that room`);
 
@@ -614,6 +634,59 @@ io.on("connection", socket => {
     const list = notifications[u.name.toLowerCase()] || [];
     const n = list.find(x => x.id === id);
     if (n) { n.read = true; saveNotificationsDebounced(); }
+  });
+
+  socket.on("dismiss-notification", ({ id } = {}) => {
+    const u = users[socket.id]; if (!u) return;
+    const key = u.name.toLowerCase();
+    if (!notifications[key]) return;
+    notifications[key] = notifications[key].filter(x => x.id !== id);
+    saveNotificationsDebounced();
+  });
+
+  socket.on("kick-member", ({ roomId, clientId: targetId } = {}) => {
+    const u = users[socket.id]; if (!u) return;
+    const room = rooms[cleanId(roomId)]; if (!room) return;
+    if (!canModerate(room, u.clientId, targetId)) return socket.emit("error-msg", "You can't do that");
+    const member = room.members.find(m => m.clientId === targetId);
+    room.members = room.members.filter(m => m.clientId !== targetId);
+    room.coAdmins = (room.coAdmins || []).filter(m => m.clientId !== targetId);
+    saveRoomsDebounced();
+    if (member) {
+      notifyUser(member.name, {
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        type: "kicked", ts: Date.now(), read: false,
+        roomId: room.id, roomName: room.name, roomIcon: room.icon,
+      });
+      const target = Object.entries(users).find(([, x]) => x.clientId === targetId);
+      if (target) io.to(target[0]).emit("my-rooms", myRoomsList(targetId));
+    }
+    broadcastRoomToMembers(room);
+    socket.emit("room-updated", publicRoomInfo(room, u.clientId));
+  });
+
+  const BAN_DURATIONS = { "1h": 3600000, "1d": 86400000, "1w": 604800000, "30d": 2592000000 };
+  socket.on("ban-member", ({ roomId, clientId: targetId, duration } = {}) => {
+    const u = users[socket.id]; if (!u) return;
+    const room = rooms[cleanId(roomId)]; if (!room) return;
+    if (!canModerate(room, u.clientId, targetId)) return socket.emit("error-msg", "You can't do that");
+    const durationMs = BAN_DURATIONS[duration] || BAN_DURATIONS["1h"];
+    const member = room.members.find(m => m.clientId === targetId);
+    const name = member?.name || room.pendingRequests.find(p => p.clientId === targetId)?.name || "Someone";
+    room.members = room.members.filter(m => m.clientId !== targetId);
+    room.coAdmins = (room.coAdmins || []).filter(m => m.clientId !== targetId);
+    room.bans = (room.bans || []).filter(b => b.clientId !== targetId);
+    room.bans.push({ clientId: targetId, name, until: Date.now() + durationMs });
+    saveRoomsDebounced();
+    notifyUser(name, {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type: "banned", ts: Date.now(), read: false,
+      roomId: room.id, roomName: room.name, roomIcon: room.icon, until: Date.now() + durationMs,
+    });
+    const target = Object.entries(users).find(([, x]) => x.clientId === targetId);
+    if (target) io.to(target[0]).emit("my-rooms", myRoomsList(targetId));
+    broadcastRoomToMembers(room);
+    socket.emit("room-updated", publicRoomInfo(room, u.clientId));
   });
 
   socket.on("load-more", ({ before, roomId } = {}) => {
