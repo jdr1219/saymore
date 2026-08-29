@@ -90,12 +90,6 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; over
 .header-title { font-size:15px; font-weight:700; color:var(--ink); letter-spacing:-.3px; max-width:130px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .header-right { display:flex; align-items:center; gap:6px; }
 
-.profile-wrap { position:relative; min-width:0; }
-.profile-trigger { display:flex; align-items:center; gap:9px; background:none; border:none; padding:0; margin:0; font:inherit; color:inherit; cursor:pointer; min-width:0; }
-.header-chevron { width:11px; height:11px; color:var(--ink-soft); flex-shrink:0; transition:transform .15s var(--ease); }
-.profile-trigger:hover .header-chevron { transform:translateY(1px); }
-.profile-menu { position:absolute; top:calc(100% + 8px); left:0; background:var(--popup-bg); backdrop-filter:blur(24px); border:1px solid var(--popup-border); border-radius:16px; box-shadow:0 14px 36px rgba(15,40,60,.25); padding:16px; width:min(230px,72vw); max-height:calc(100vh - 110px); overflow-y:auto; z-index:30; opacity:0; transform:scale(.92) translateY(-6px); pointer-events:none; transition:opacity .18s var(--ease),transform .18s var(--ease); }
-.profile-menu.open { opacity:1; transform:scale(1) translateY(0); pointer-events:auto; }
 .profile-menu-avatar-row { display:flex; justify-content:center; margin-bottom:14px; }
 .profile-avatar-edit-wrap { position:relative; width:64px; height:64px; }
 .profile-avatar-edit-wrap img { width:64px; height:64px; border-radius:50%; object-fit:cover; display:block; box-shadow:0 4px 12px rgba(15,40,60,.2); }
@@ -463,8 +457,7 @@ body.select-mode-active .bubble { cursor:pointer; }
 .room-list-more { font-size:11px; color:var(--ink-soft); text-align:center; padding:4px 0 0; font-style:italic; }
 
 /* ── Room Settings modal (icon change, promote, kick, ban) ── */
-.modal-overlay { position:fixed; inset:0; background:rgba(10,20,30,.4); z-index:80; display:flex; align-items:center; justify-content:center; padding:20px; animation:fadeUp .18s var(--ease) both; }
-.room-settings-modal { width:min(360px,100%); max-height:min(520px,80vh); display:flex; flex-direction:column; border-radius:22px; padding:18px; overflow:hidden; }
+.room-settings-panel { position:fixed; z-index:80; width:min(300px,90vw); max-height:min(420px,75vh); display:flex; flex-direction:column; border-radius:20px; padding:16px; overflow-y:auto; animation:fadeUp .16s var(--ease) both; }
 .rs-header { display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-shrink:0; }
 .rs-icon-btn { font-size:22px; width:40px; height:40px; border-radius:50%; border:1px solid rgba(255,255,255,.4); background:rgba(255,255,255,.25); cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
 .rs-icon-btn:hover { background:color-mix(in srgb, var(--blue) 16%, transparent); }
@@ -493,9 +486,19 @@ body.select-mode-active .bubble { cursor:pointer; }
 .search-group-label:first-child { margin-top:0; }
 .room-search-join-btn.co { background:var(--blue-deep); }
 
-.current-room-label { display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700; color:var(--ink-soft); background:rgba(255,255,255,0.22); border:1px solid rgba(255,255,255,0.32); padding:5px 12px; border-radius:14px; max-width:170px; overflow:hidden; flex-shrink:1; }
-.current-room-icon { flex-shrink:0; }
-.current-room-name { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.current-room-label { display:flex; align-items:center; gap:7px; font-size:12.5px; font-weight:700; color:var(--ink-soft); background:rgba(255,255,255,0.22); border:1px solid rgba(255,255,255,0.32); padding:6px 14px; border-radius:16px; max-width:220px; overflow:hidden; flex-shrink:1; }
+.current-room-icon { flex-shrink:0; font-size:16px; }
+.current-room-name { font-size:16px; font-weight:800; color:var(--ink); letter-spacing:-.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* ── profile rail section ── */
+.rail-avatar-btn { padding:0; overflow:hidden; }
+.rail-avatar-btn img { width:100%; height:100%; object-fit:cover; border-radius:50%; }
+#profile-flyout { display:flex; flex-direction:column; }
+
+/* ── chat/games view toggle (both live inside the same .chat-card) ── */
+.chat-card { position:relative; }
+#chat-view, #games-view { display:flex; flex-direction:column; flex:1; min-height:0; }
+#chat-view.hidden, #games-view.hidden { display:none; }
 
 .rail-backdrop { display:none; }
 .rail-backdrop.show { display:block; position:fixed; inset:0; background:rgba(10,20,30,.35); z-index:35; }

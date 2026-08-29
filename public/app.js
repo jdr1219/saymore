@@ -356,7 +356,7 @@ function showFieldError(msg) { $('field-error').textContent = msg || ''; }
 function refreshDefaultAvatars() {
   const theme = getTheme(currentThemeId);
   if (!myAvatar) {
-    $('header-avatar').src = letterAvatarDataUrl(myName, theme);
+    $('rail-avatar').src = letterAvatarDataUrl(myName, theme);
     if (pendingProfileMenuAvatar === undefined) {
       $('profile-menu-avatar-preview').src = letterAvatarDataUrl(myName, theme);
     }
@@ -367,8 +367,8 @@ function refreshDefaultAvatars() {
 }
 
 function updateHeaderProfile() {
-  $('header-username').textContent = myName || 'Glass Chat';
-  $('header-avatar').src = myAvatar || letterAvatarDataUrl(myName, getTheme(currentThemeId));
+  $('rail-profile-name').textContent = myName || 'Profile';
+  $('rail-avatar').src = myAvatar || letterAvatarDataUrl(myName, getTheme(currentThemeId));
 }
 
 function goStraightToChat() {
@@ -461,7 +461,8 @@ socket.on('name-taken', () => {
   $('name-input').classList.remove('shake'); void $('name-input').offsetWidth; $('name-input').classList.add('shake');
 });
 socket.on('error-msg', msg => {
-  if ($('profile-menu').classList.contains('open')) { $('profile-menu-error').textContent = msg; return; }
+  const profileSection = document.querySelector('.rail-section[data-section="profile"]');
+  if (profileSection && profileSection.classList.contains('section-expanded')) { $('profile-menu-error').textContent = msg; return; }
   if (!$('login-screen').classList.contains('hidden')) { showFieldError(msg); return; }
   showToast(msg);
 });
@@ -495,23 +496,17 @@ socket.on('join-success', () => {
   }
 });
 
-/* ── settings dropdown: change display name / photo any time ── */
-$('profile-trigger').addEventListener('click', e => {
+/* ── profile rail section: change display name / photo any time ── */
+$('rail-profile-btn').addEventListener('click', e => {
   e.stopPropagation();
-  $('more-menu').classList.remove('open');
-  const menu = $('profile-menu');
-  const opening = !menu.classList.contains('open');
-  menu.classList.toggle('open');
+  const section = document.querySelector('.rail-section[data-section="profile"]');
+  const opening = !section.classList.contains('section-expanded');
+  toggleRailSection('profile');
   if (opening) {
     $('profile-menu-name-input').value = myName;
     $('profile-menu-avatar-preview').src = myAvatar || letterAvatarDataUrl(myName, getTheme(currentThemeId));
     $('profile-menu-error').textContent = '';
     pendingProfileMenuAvatar = undefined;
-  }
-});
-document.addEventListener('click', e => {
-  if (!$('profile-menu').contains(e.target) && !$('profile-trigger').contains(e.target)) {
-    $('profile-menu').classList.remove('open');
   }
 });
 $('profile-menu-avatar-btn').addEventListener('click', () => $('profile-menu-avatar-upload').click());
@@ -546,7 +541,7 @@ $('profile-menu-save-btn').addEventListener('click', async () => {
     if (myAvatar) localStorage.setItem('gc_avatar', myAvatar); else localStorage.removeItem('gc_avatar');
     socket.emit('update-profile', { name: myName, avatar: myAvatar });
     updateHeaderProfile();
-    $('profile-menu').classList.remove('open');
+    collapseRailSections();
   } catch {
     $('profile-menu-error').textContent = 'Network error — try again';
   }
@@ -572,8 +567,8 @@ async function signOut() {
   pendingSetupAvatar = null; pendingProfileMenuAvatar = undefined;
   hasJoinedOnce = false;
 
-  $('profile-menu').classList.remove('open');
   $('more-menu').classList.remove('open');
+  collapseRailSections();
   $('recently-deleted-screen').classList.add('hidden');
   $('chat-screen').classList.add('hidden');
 
@@ -827,7 +822,7 @@ $('messages').addEventListener('click', e => {
 /* ── more menu (header "..." button) ── */
 $('more-btn').addEventListener('click', e => {
   e.stopPropagation();
-  $('profile-menu').classList.remove('open');
+  collapseRailSections();
   $('more-menu').classList.toggle('open');
 });
 document.addEventListener('click', e => {
@@ -849,6 +844,30 @@ function closeRecentlyDeleted() {
 }
 $('recently-deleted-btn').addEventListener('click', openRecentlyDeleted);
 $('rd-back-btn').addEventListener('click', closeRecentlyDeleted);
+
+/* ════════════════════════════════════════════════
+   CHAT / GAMES view toggle — Glass Games lives inside this same
+   page now (no more separate games.html) so there's one socket,
+   one identity, and one theme application — no cross-page flash
+   or duplicate-join bugs.
+════════════════════════════════════════════════ */
+let gamesLoadedOnce = false;
+function showGamesView() {
+  $('chat-view').classList.add('hidden');
+  $('games-view').classList.remove('hidden');
+  document.querySelectorAll('.rail-link').forEach(el => el.classList.add('active-page'));
+  if (!gamesLoadedOnce && typeof loadGames === 'function') { gamesLoadedOnce = true; loadGames(); }
+}
+function showChatView() {
+  $('games-view').classList.add('hidden');
+  $('chat-view').classList.remove('hidden');
+  document.querySelectorAll('.rail-link').forEach(el => el.classList.remove('active-page'));
+}
+$('rail-games-btn').addEventListener('click', showGamesView);
+$('games-back-btn').addEventListener('click', showChatView);
+$('games-rail-toggle-btn').addEventListener('click', () => {
+  $('side-rail').classList.contains('mobile-open') ? closeMobileRail() : openMobileRail();
+});
 
 function renderRecentlyDeletedList() {
   const list = $('recently-deleted-list');

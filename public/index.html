@@ -10,6 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="style.css"/>
+<link rel="stylesheet" href="games.css"/>
 </head>
 <body>
 
@@ -43,6 +44,35 @@
   <div class="app-layout" id="app-layout">
     <div class="rail-backdrop" id="rail-backdrop"></div>
     <nav class="glass side-rail" id="side-rail">
+      <div class="rail-section" data-section="profile">
+        <button class="rail-row" id="rail-profile-btn" type="button" title="Your profile">
+          <span class="rail-icon-btn rail-avatar-btn"><img id="rail-avatar" src="favicon-32.png" alt=""/></span>
+          <span class="rail-label" id="rail-profile-name">Profile</span>
+        </button>
+        <div class="rail-flyout" id="profile-flyout">
+          <div class="profile-menu-avatar-row">
+            <div class="profile-avatar-edit-wrap">
+              <img id="profile-menu-avatar-preview" src="apple-touch-icon.png" alt=""/>
+              <button class="avatar-edit-overlay" id="profile-menu-avatar-btn" title="Change photo" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+              </button>
+            </div>
+            <input type="file" id="profile-menu-avatar-upload" accept="image/*" style="display:none"/>
+          </div>
+          <label class="profile-menu-label" for="profile-menu-name-input">Display name</label>
+          <input class="profile-menu-name-input" id="profile-menu-name-input" type="text" maxlength="20" autocomplete="off" spellcheck="false"/>
+          <div class="profile-menu-error" id="profile-menu-error"></div>
+          <button class="profile-menu-save-btn" id="profile-menu-save-btn" type="button">Save changes</button>
+          <div class="profile-menu-divider"></div>
+          <div class="theme-picker-inline">
+            <div class="theme-picker-label">Theme</div>
+            <div class="theme-mini-grid" id="theme-grid-profile"></div>
+          </div>
+          <div class="profile-menu-divider"></div>
+          <button class="signout-btn" id="signout-btn" type="button">Sign Out</button>
+        </div>
+      </div>
+
       <div class="rail-section" data-section="notis">
         <button class="rail-row" id="rail-notis-btn" type="button" title="Notifications">
           <span class="rail-icon-btn">
@@ -85,47 +115,21 @@
         </div>
       </div>
 
-      <a class="rail-section rail-link" href="games.html" title="Glass Games">
-        <span class="rail-row">
+      <div class="rail-section rail-link" data-section="games">
+        <button class="rail-row" id="rail-games-btn" type="button" title="Glass Games">
           <span class="rail-icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><circle cx="15" cy="13" r="1"/><circle cx="18" cy="11" r="1"/><rect x="2" y="6" width="20" height="12" rx="6"/></svg></span>
           <span class="rail-label">Glass Games</span>
-        </span>
-      </a>
+        </button>
+      </div>
     </nav>
 
     <div class="glass chat-card">
+    <div id="chat-view">
     <header class="chat-header">
-      <div class="header-left profile-wrap">
+      <div class="header-left">
         <button class="icon-btn rail-toggle-btn" id="rail-toggle-btn" title="Menu" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
         </button>
-        <button class="profile-trigger" id="profile-trigger" title="Your profile" type="button">
-          <img class="header-logo" id="header-avatar" src="favicon-32.png" alt=""/>
-          <span class="header-title" id="header-username">Glass Chat</span>
-          <svg class="header-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-        </button>
-        <div class="profile-menu" id="profile-menu">
-          <div class="profile-menu-avatar-row">
-            <div class="profile-avatar-edit-wrap">
-              <img id="profile-menu-avatar-preview" src="apple-touch-icon.png" alt=""/>
-              <button class="avatar-edit-overlay" id="profile-menu-avatar-btn" title="Change photo" type="button">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-              </button>
-            </div>
-            <input type="file" id="profile-menu-avatar-upload" accept="image/*" style="display:none"/>
-          </div>
-          <label class="profile-menu-label" for="profile-menu-name-input">Display name</label>
-          <input class="profile-menu-name-input" id="profile-menu-name-input" type="text" maxlength="20" autocomplete="off" spellcheck="false"/>
-          <div class="profile-menu-error" id="profile-menu-error"></div>
-          <button class="profile-menu-save-btn" id="profile-menu-save-btn" type="button">Save changes</button>
-          <div class="profile-menu-divider"></div>
-          <div class="theme-picker-inline">
-            <div class="theme-picker-label">Theme</div>
-            <div class="theme-mini-grid" id="theme-grid-profile"></div>
-          </div>
-          <div class="profile-menu-divider"></div>
-          <button class="signout-btn" id="signout-btn" type="button">Sign Out</button>
-        </div>
       </div>
       <div class="current-room-label" id="current-room-label">
         <span class="current-room-icon" id="current-room-icon">💬</span>
@@ -211,6 +215,26 @@
       </button>
     </footer>
     </div>
+
+    <div id="games-view" class="hidden">
+      <header class="chat-header">
+        <div class="header-left">
+          <button class="icon-btn rail-toggle-btn" id="games-rail-toggle-btn" title="Menu" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+          </button>
+          <button class="icon-btn" id="games-back-btn" title="Back to chat" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <span class="header-title">Glass Games</span>
+        </div>
+        <div class="header-right"></div>
+      </header>
+      <div class="games-body" id="games-body">
+        <input type="text" id="games-search" class="games-search-input" placeholder="Search games..." autocomplete="off"/>
+        <div id="games-results"></div>
+      </div>
+    </div>
+    </div>
   </div>
 </div>
 
@@ -234,6 +258,7 @@
 <script src="themes-data.js"></script>
 <script src="sidebar.js"></script>
 <script src="app.js"></script>
+<script src="games.js"></script>
 
 </body>
 </html>

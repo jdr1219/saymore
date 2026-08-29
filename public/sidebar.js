@@ -1,11 +1,8 @@
 /* ════════ Glass Chat — shared sidebar (rail) ════════
-   Loaded on every page (index.html AND games.html) so the rail —
-   Notifications / Rooms / Search / Glass Games — is always present.
-   On index.html this file loads AFTER app.js and reuses its socket,
-   $, escapeHtml, and identity. On any standalone page (games.html)
-   it creates its own lightweight socket connection using the same
-   saved identity from localStorage, so rooms/notifications still work
-   without a full chat UI. */
+   Loaded on index.html after app.js, and reuses its $, escapeHtml,
+   and identity. Games now lives inside index.html too (a toggled
+   view, not a separate page), so there's only ever one socket and
+   one identity to worry about. */
 
 if (typeof $ === 'undefined') {
   window.$ = id => document.getElementById(id);
@@ -15,15 +12,9 @@ if (typeof escapeHtml === 'undefined') {
 }
 if (typeof socket === 'undefined') {
   window.socket = io();
-  const savedName = localStorage.getItem('gc_name');
-  const savedClientId = localStorage.getItem('gc_client_id');
-  if (savedName && savedClientId) {
-    socket.on('connect', () => socket.emit('join', { name: savedName, clientId: savedClientId }));
-  }
 }
 function sbMyName() {
-  if (typeof myName !== 'undefined' && myName) return myName;
-  return localStorage.getItem('gc_name') || '';
+  return (typeof myName !== 'undefined' && myName) || '';
 }
 
 /* Searchable emoji set for room icons — not exhaustive, but covers
@@ -59,7 +50,7 @@ function timeAgoShort(ts) {
 
 function updateCurrentRoomLabel() {
   const iconEl = $('current-room-icon'), nameEl = $('current-room-name'), labelEl = $('current-room-label');
-  if (!labelEl) return; // this page has no chat header (e.g. games.html)
+  if (!labelEl) return; // no chat header currently mounted (shouldn't happen now that games is a view, not a page)
   iconEl.textContent = currentRoomInfo.icon || '💬';
   nameEl.textContent = currentRoomInfo.name || 'General';
   labelEl.title = currentRoomInfo.isPrivileged ? `${currentRoomInfo.name} — room settings` : currentRoomInfo.name;
@@ -150,16 +141,16 @@ function openIconPicker(roomId, anchorEl) {
   setTimeout(() => document.addEventListener('click', close), 0);
 }
 
-/* ── room settings (admin/co-admin): icon, promote, kick, ban ── */
+/* ── room settings (admin/co-admin): icon, promote, kick, ban ──
+   A light anchored panel (matching the emoji picker's style) rather
+   than a heavy full-screen dark modal. */
 const BAN_DURATIONS = [['1h','1 hour'],['1d','1 day'],['1w','1 week'],['30d','30 days']];
-function openRoomSettings() {
+function openRoomSettings(anchorEl) {
   if (!currentRoomInfo.isPrivileged) return;
-  document.querySelectorAll('.modal-overlay').forEach(m => m.remove());
+  document.querySelectorAll('.room-settings-panel').forEach(m => m.remove());
 
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  const modal = document.createElement('div');
-  modal.className = 'glass room-settings-modal';
+  const panel = document.createElement('div');
+  panel.className = 'glass room-settings-panel';
 
   const header = document.createElement('div');
   header.className = 'rs-header';
@@ -167,16 +158,16 @@ function openRoomSettings() {
   iconBtn.className = 'rs-icon-btn';
   iconBtn.textContent = currentRoomInfo.icon || '💬';
   iconBtn.title = 'Change room icon';
-  iconBtn.addEventListener('click', () => openIconPicker(currentRoomId, iconBtn));
+  iconBtn.addEventListener('click', e => { e.stopPropagation(); openIconPicker(currentRoomId, iconBtn); });
   const title = document.createElement('div');
   title.className = 'rs-title';
   title.textContent = `${currentRoomInfo.name} settings`;
   const closeBtn = document.createElement('button');
   closeBtn.className = 'rs-close';
   closeBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-  closeBtn.addEventListener('click', () => overlay.remove());
+  closeBtn.addEventListener('click', () => panel.remove());
   header.appendChild(iconBtn); header.appendChild(title); header.appendChild(closeBtn);
-  modal.appendChild(header);
+  panel.appendChild(header);
 
   const list = document.createElement('div');
   list.className = 'rs-members-list';
@@ -234,41 +225,40 @@ function openRoomSettings() {
     }
     list.appendChild(row);
   });
-  modal.appendChild(list);
+  panel.appendChild(list);
 
   const bans = currentRoomInfo.bans || [];
   if (bans.length) {
     const bansLabel = document.createElement('div');
     bansLabel.className = 'rs-section-label'; bansLabel.textContent = 'Active bans';
-    modal.appendChild(bansLabel);
+    panel.appendChild(bansLabel);
     bans.forEach(b => {
       const row = document.createElement('div');
       row.className = 'rs-ban-row';
       row.textContent = `${b.name} — until ${new Date(b.until).toLocaleString()}`;
-      modal.appendChild(row);
+      panel.appendChild(row);
     });
   }
 
-  overlay.appendChild(modal);
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-  document.body.appendChild(overlay);
+  document.body.appendChild(panel);
+  const r = anchorEl.getBoundingClientRect();
+  panel.style.top = Math.min(r.bottom + 8, window.innerHeight - 420) + 'px';
+  panel.style.left = Math.max(12, Math.min(r.left, window.innerWidth - 300)) + 'px';
+  const close = ev => { if (!panel.contains(ev.target) && ev.target !== anchorEl && !anchorEl.contains(ev.target)) { panel.remove(); document.removeEventListener('click', close); } };
+  setTimeout(() => document.addEventListener('click', close), 0);
 }
 (function wireRoomLabel() {
   const labelEl = document.getElementById('current-room-label');
-  if (labelEl) labelEl.addEventListener('click', () => { if (currentRoomInfo.isPrivileged) openRoomSettings(); });
+  if (labelEl) labelEl.addEventListener('click', () => { if (currentRoomInfo.isPrivileged) openRoomSettings(labelEl); });
 })();
 
-/* Switching rooms only makes sense live on the chat page (there's a
-   message pane to repopulate). On a standalone page like games.html,
-   send the person to the chat with that room preselected instead. */
+/* Glass Games is now a view inside this same page, so switching a
+   room always happens live via the socket — no more cross-page nav. */
 function switchToRoom(roomId) {
   if (roomId === currentRoomId) return;
-  if (window.__isChatPage) {
-    socket.emit('switch-room', { roomId });
-    collapseRailSections();
-  } else {
-    window.location.href = 'index.html?room=' + encodeURIComponent(roomId);
-  }
+  socket.emit('switch-room', { roomId });
+  collapseRailSections();
+  if (typeof showChatView === 'function') showChatView();
 }
 
 /* ── notifications ── */
@@ -546,7 +536,6 @@ if ($('rail-toggle-btn')) $('rail-toggle-btn').addEventListener('click', () => {
 });
 if ($('rail-backdrop')) $('rail-backdrop').addEventListener('click', closeMobileRail);
 
-/* Highlight the Games rail link when we're already on that page. */
-if (/games\.html$/.test(location.pathname)) {
-  document.querySelectorAll('.rail-link').forEach(el => el.classList.add('active-page'));
-}
+/* Games-view active-page highlighting is handled by
+   showGamesView()/showChatView() in app.js now, since it's a
+   toggled view rather than a separate page. */
