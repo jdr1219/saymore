@@ -155,6 +155,52 @@ function saveProfilesDebounced() {
   }, 500);
 }
 
+/* ── Identities (name + 4-digit code) ──────────────────────────
+   A lightweight account system so a name can't be impersonated: at
+   signup you pick (or are given) a 4-digit code that's unique for
+   that name — like name#1234. Knowing the correct name+code lets you
+   "sign in" from any browser/device; doing so migrates your room
+   memberships/admin/co-admin/ban references over to the new device's
+   clientId, so access follows the account rather than the browser. */
+const IDENTITIES_FILE = path.join(__dirname, "data", "identities.json");
+function loadIdentities() {
+  try { return JSON.parse(fs.readFileSync(IDENTITIES_FILE, "utf8")); }
+  catch { return {}; }
+}
+let identitiesSaveTimer = null;
+function saveIdentitiesDebounced() {
+  clearTimeout(identitiesSaveTimer);
+  identitiesSaveTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(path.dirname(IDENTITIES_FILE), { recursive: true });
+      fs.writeFileSync(IDENTITIES_FILE, JSON.stringify(identities));
+    } catch (e) { log.error("identities-save-failed", { err: e.message }); }
+  }, 500);
+}
+function identityKey(name, code) { return `${String(name || "").toLowerCase()}#${code}`; }
+function cleanCode(code) { return String(code || "").replace(/\D/g, "").slice(0, 4); }
+function generateCode(name) {
+  for (let i = 0; i < 40; i++) {
+    const c = String(Math.floor(1000 + Math.random() * 9000));
+    if (!identities[identityKey(name, c)]) return c;
+  }
+  return String(Math.floor(1000 + Math.random() * 9000)); // extremely unlikely fallback
+}
+/* Moves every room reference (admin/co-admin/member/pending/ban) from
+   one clientId to another — used when someone signs in on a new
+   device so their standing in rooms follows their account. */
+function migrateClientId(oldCid, newCid) {
+  if (!oldCid || !newCid || oldCid === newCid) return;
+  for (const room of Object.values(rooms)) {
+    if (room.adminClientId === oldCid) room.adminClientId = newCid;
+    room.members.forEach(m => { if (m.clientId === oldCid) m.clientId = newCid; });
+    (room.coAdmins || []).forEach(m => { if (m.clientId === oldCid) m.clientId = newCid; });
+    room.pendingRequests.forEach(p => { if (p.clientId === oldCid) p.clientId = newCid; });
+    (room.bans || []).forEach(b => { if (b.clientId === oldCid) b.clientId = newCid; });
+  }
+  saveRoomsDebounced();
+}
+
 /* ── Rooms ──────────────────────────────────────────────────
    'general' is the always-on default room everyone lands in —
    it behaves exactly as the old single-room chat always did
@@ -238,6 +284,7 @@ const RATE_LIMIT  = 8;
 
 const history  = loadHistory();
 const profiles = loadProfiles(); // ip -> { name, avatar, updatedAt }
+const identities = loadIdentities(); // "name#code" -> { name, code, avatar, clientId, updatedAt }
 const rooms         = loadRooms();          // roomId -> RoomMeta (excludes 'general')
 const roomMessages  = loadRoomMessages();   // roomId -> [msg,...]  (excludes 'general', which uses `history`)
 const notifications = loadNotifications();  // usernameLower -> [notif,...]
@@ -366,7 +413,7 @@ function validAvatar(a) {
 app.get("/api/profile", (req, res) => {
   const ip = getClientIp(req);
   const p = profiles[ip];
-  if (p) res.json({ exists: true, name: p.name, avatar: p.avatar || null });
+  if (p) res.json({ exists: true, name: p.name, avatar: p.avatar || null, code: p.code || null });
   else res.json({ exists: false });
 });
 
@@ -379,10 +426,28 @@ app.post("/api/profile", (req, res) => {
   const existing = profiles[ip] || {};
   let avatar = existing.avatar || null;
   if ("avatar" in body) avatar = body.avatar === null ? null : validAvatar(body.avatar);
+  const code = cleanCode(body.code) || existing.code || null;
 
-  profiles[ip] = { name, avatar, updatedAt: Date.now() };
+  profiles[ip] = { name, avatar, code, updatedAt: Date.now() };
   saveProfilesDebounced();
-  res.json({ ok: true, name, avatar });
+  res.json({ ok: true, name, avatar, code });
+});
+
+/* Live uniqueness check while picking/changing a 4-digit code — a
+   code only needs to be unique for that specific name (name#code),
+   not globally. */
+app.get("/api/check-code", (req, res) => {
+  const name = sanitize(req.query.name, 24);
+  const code = cleanCode(req.query.code);
+  const clientId = String(req.query.clientId || "").slice(0, 64);
+  if (!name || code.length !== 4) return res.json({ available: false });
+  const existing = identities[identityKey(name, code)];
+  res.json({ available: !existing || existing.clientId === clientId });
+});
+
+app.get("/api/suggest-code", (req, res) => {
+  const name = sanitize(req.query.name, 24) || "user";
+  res.json({ code: generateCode(name) });
 });
 
 /* Sign out — forgets the profile saved against this visitor's IP so the
@@ -422,7 +487,7 @@ async function fetchPreview(url) {
 io.on("connection", socket => {
   log.info("connect", { id: socket.id });
 
-  socket.on("join", ({ name, clientId, avatar } = {}) => {
+  socket.on("join", ({ name, clientId, avatar, code } = {}) => {
     const username = sanitize(name, 24);
     const cid = sanitize(clientId, 64) || null;
     if (!username) return socket.emit("error-msg", "Invalid name");
@@ -432,8 +497,28 @@ io.on("connection", socket => {
     );
     if (conflict) return socket.emit("name-taken");
 
+    // 4-digit code = a lightweight account (name#code) so a name can't
+    // be impersonated. Knowing the right code for a name signs you in —
+    // from a new browser this migrates your room standing over to it.
+    let finalCode = cleanCode(code);
+    let identity = null;
+    if (finalCode.length === 4) {
+      const key = identityKey(username, finalCode);
+      identity = identities[key];
+      if (identity) {
+        if (identity.clientId && identity.clientId !== cid) migrateClientId(identity.clientId, cid);
+        identity.clientId = cid;
+        identity.avatar = validAvatar(avatar) || identity.avatar || null;
+        identity.updatedAt = Date.now();
+      } else {
+        identity = { name: username, code: finalCode, avatar: validAvatar(avatar), clientId: cid, updatedAt: Date.now() };
+        identities[key] = identity;
+      }
+      saveIdentitiesDebounced();
+    }
+
     if (cid) evictStaleSocket(cid, socket.id); // drop any earlier session from this same browser
-    users[socket.id] = { name: username, clientId: cid, avatar: validAvatar(avatar), roomId: "general" };
+    users[socket.id] = { name: username, clientId: cid, avatar: validAvatar(avatar) || identity?.avatar || null, roomId: "general", code: finalCode || null };
     socket.join("general");
     log.info("join", { username });
 
@@ -443,17 +528,69 @@ io.on("connection", socket => {
     if (cid) {
       const ip = getSocketIp(socket.handshake);
       const existing = profiles[ip] || {};
-      profiles[ip] = { name: username, avatar: validAvatar(avatar) || existing.avatar || null, clientId: cid, updatedAt: Date.now() };
+      profiles[ip] = { name: username, avatar: validAvatar(avatar) || existing.avatar || null, code: finalCode || existing.code || null, clientId: cid, updatedAt: Date.now() };
       saveProfilesDebounced();
     }
 
-    socket.emit("join-success");
+    socket.emit("join-success", { code: finalCode || null });
     socket.emit("history", history.slice(-PAGE_SIZE).map(publicMsg));
     socket.emit("history-has-more", history.length > PAGE_SIZE);
     socket.emit("my-rooms", myRoomsList(cid));
     socket.emit("notifications", notifications[username.toLowerCase()] || []);
     socket.broadcast.emit("system", `${username} joined`);
     io.emit("user-count", Object.keys(users).length);
+  });
+
+  /* Change your 4-digit code from profile settings — must stay
+     unique for your name, same as at signup. */
+  socket.on("change-code", ({ newCode } = {}) => {
+    const u = users[socket.id]; if (!u) return;
+    const clean = cleanCode(newCode);
+    if (clean.length !== 4) return socket.emit("error-msg", "Code must be 4 digits");
+    const newKey = identityKey(u.name, clean);
+    const existing = identities[newKey];
+    if (existing && existing.clientId !== u.clientId) return socket.emit("error-msg", "That code is already taken for this name");
+
+    if (u.code) delete identities[identityKey(u.name, u.code)];
+    identities[newKey] = { name: u.name, code: clean, avatar: u.avatar, clientId: u.clientId, updatedAt: Date.now() };
+    u.code = clean;
+    saveIdentitiesDebounced();
+    socket.emit("code-changed", { code: clean });
+  });
+
+  /* Permanently deletes this person's account: their identity (name#code),
+     their IP-recognized profile, their room memberships/admin/co-admin
+     standing (promoting a co-admin to admin if they were the sole admin),
+     and their notification inbox. Messages they've already sent stay
+     (deleting an account isn't retroactive message deletion). */
+  socket.on("delete-account", () => {
+    const u = users[socket.id]; if (!u) return;
+    if (u.code) delete identities[identityKey(u.name, u.code)];
+    saveIdentitiesDebounced();
+
+    const ip = getSocketIp(socket.handshake);
+    delete profiles[ip];
+    saveProfilesDebounced();
+
+    for (const room of Object.values(rooms)) {
+      room.members = room.members.filter(m => m.clientId !== u.clientId);
+      room.coAdmins = (room.coAdmins || []).filter(m => m.clientId !== u.clientId);
+      room.pendingRequests = room.pendingRequests.filter(p => p.clientId !== u.clientId);
+      if (room.adminClientId === u.clientId) {
+        const promoted = room.coAdmins.shift();
+        if (promoted) { room.adminClientId = promoted.clientId; room.adminName = promoted.name; }
+        else { room.adminClientId = null; room.adminName = null; }
+      }
+    }
+    saveRoomsDebounced();
+
+    delete notifications[u.name.toLowerCase()];
+    saveNotificationsDebounced();
+
+    socket.emit("account-deleted");
+    delete users[socket.id]; delete rateLimits[socket.id];
+    io.emit("user-count", Object.keys(users).length);
+    socket.disconnect(true);
   });
 
   socket.on("update-profile", (data = {}) => {
@@ -538,6 +675,30 @@ io.on("connection", socket => {
     room.icon = clean;
     saveRoomsDebounced();
     broadcastRoomToMembers(room);
+  });
+
+  /* Only the original admin can delete a room outright (co-admins get
+     everything else, but this one's permanent and affects everyone,
+     so it stays admin-only). */
+  socket.on("delete-room", ({ roomId } = {}) => {
+    const u = users[socket.id]; if (!u) return;
+    const rid = cleanId(roomId);
+    const room = rooms[rid]; if (!room) return;
+    if (room.adminClientId !== u.clientId) return socket.emit("error-msg", "Only the room admin can delete this room");
+
+    const memberNames = [room.adminName, ...(room.coAdmins || []).map(c => c.name), ...room.members.map(m => m.name)];
+    delete rooms[rid];
+    delete roomMessages[rid];
+    saveRoomsDebounced();
+    saveRoomMessagesDebounced();
+
+    memberNames.forEach(name => {
+      const target = Object.entries(users).find(([, x]) => x.name.toLowerCase() === name.toLowerCase());
+      if (!target) return;
+      const [sid, x] = target;
+      io.to(sid).emit("room-deleted", { roomId: rid });
+      io.to(sid).emit("my-rooms", myRoomsList(x.clientId));
+    });
   });
 
   socket.on("request-join", ({ roomId } = {}) => {
@@ -806,6 +967,7 @@ function shutdown(signal) {
     fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
     fs.writeFileSync(DATA_FILE, JSON.stringify(serializeHistory()));
     fs.writeFileSync(PROFILES_FILE, JSON.stringify(profiles));
+    fs.writeFileSync(IDENTITIES_FILE, JSON.stringify(identities));
     fs.writeFileSync(ROOMS_FILE, JSON.stringify(rooms));
     fs.writeFileSync(ROOM_MESSAGES_FILE, JSON.stringify(serializeRoomMessages()));
     fs.writeFileSync(NOTIFICATIONS_FILE, JSON.stringify(notifications));

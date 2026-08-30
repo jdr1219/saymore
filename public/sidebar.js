@@ -169,6 +169,30 @@ function openRoomSettings(anchorEl) {
   header.appendChild(iconBtn); header.appendChild(title); header.appendChild(closeBtn);
   panel.appendChild(header);
 
+  const inviteRow = document.createElement('div');
+  inviteRow.className = 'rs-invite-row';
+  const inviteInput = document.createElement('input');
+  inviteInput.className = 'rs-invite-input';
+  inviteInput.placeholder = 'Invite by name...';
+  inviteInput.autocomplete = 'off';
+  const inviteBtn = document.createElement('button');
+  inviteBtn.className = 'rs-action-btn rs-promote'; inviteBtn.textContent = 'Invite';
+  const inviteCoBtn = document.createElement('button');
+  inviteCoBtn.className = 'rs-action-btn rs-promote'; inviteCoBtn.textContent = '+Co';
+  inviteCoBtn.title = 'Invite as co-admin';
+  function doInvite(asCoAdmin) {
+    const name = inviteInput.value.trim();
+    if (!name) return;
+    socket.emit('invite-to-room', { roomId: currentRoomId, name, asCoAdmin });
+    inviteInput.value = '';
+    showToast(`Invite sent to ${name}`);
+  }
+  inviteBtn.addEventListener('click', () => doInvite(false));
+  inviteCoBtn.addEventListener('click', () => doInvite(true));
+  inviteInput.addEventListener('keydown', e => { if (e.key === 'Enter') doInvite(false); });
+  inviteRow.appendChild(inviteInput); inviteRow.appendChild(inviteBtn); inviteRow.appendChild(inviteCoBtn);
+  panel.appendChild(inviteRow);
+
   const list = document.createElement('div');
   list.className = 'rs-members-list';
   const members = currentRoomInfo.members || [];
@@ -238,6 +262,18 @@ function openRoomSettings(anchorEl) {
       row.textContent = `${b.name} — until ${new Date(b.until).toLocaleString()}`;
       panel.appendChild(row);
     });
+  }
+
+  if (currentRoomInfo.isAdmin) {
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'rs-delete-room-btn';
+    deleteBtn.textContent = 'Delete Room';
+    deleteBtn.addEventListener('click', () => {
+      if (!confirm(`Delete "${currentRoomInfo.name}" for everyone? This can't be undone.`)) return;
+      socket.emit('delete-room', { roomId: currentRoomId });
+      panel.remove();
+    });
+    panel.appendChild(deleteBtn);
   }
 
   document.body.appendChild(panel);
@@ -465,6 +501,15 @@ socket.on('room-updated', room => {
   if (room.id === currentRoomId) currentRoomInfo = room;
   renderRoomList();
   updateCurrentRoomLabel();
+});
+socket.on('room-deleted', ({ roomId }) => {
+  myRooms = myRooms.filter(r => r.id !== roomId);
+  document.querySelectorAll('.room-settings-panel').forEach(p => p.remove());
+  renderRoomList();
+  if (currentRoomId === roomId) {
+    showToast('This room was deleted');
+    switchToRoom('general');
+  }
 });
 socket.on('room-history', ({ roomId, room }) => {
   currentRoomId = roomId;

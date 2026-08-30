@@ -307,6 +307,12 @@ if (!clientId) {
   clientId = (window.crypto?.randomUUID?.() || (Date.now() + '_' + Math.random().toString(36).slice(2)));
   localStorage.setItem('gc_client_id', clientId);
 }
+let myCode = localStorage.getItem('gc_code') || null;
+function setMyCode(code) {
+  myCode = code || null;
+  if (myCode) localStorage.setItem('gc_code', myCode);
+  else localStorage.removeItem('gc_code');
+}
 
 /* ════════════════════════════════════════════════
    PERSONAL "delete for me" / Recently Deleted store
@@ -376,14 +382,52 @@ function goStraightToChat() {
   $('login-screen').classList.add('hidden');
   $('chat-screen').classList.remove('hidden');
   updateHeaderProfile();
-  socket.emit('join', { name: myName, clientId, avatar: myAvatar });
+  socket.emit('join', { name: myName, clientId, avatar: myAvatar, code: myCode });
 }
+
+/* ── sign up vs sign in ──
+   Sign up: pick (or accept a suggested) 4-digit code, tied to your
+   name, so no one else can pose as you. Sign in: prove you already
+   own a name by entering its code — works from any browser/device,
+   and moves your room standing over to this one. */
+let loginMode = 'signup';
+function setLoginMode(mode) {
+  loginMode = mode;
+  const isSignIn = mode === 'signin';
+  $('setup-avatar-wrap').classList.toggle('hidden', isSignIn);
+  $('signup-code-row').classList.toggle('hidden', isSignIn);
+  $('signin-code-input').classList.toggle('hidden', !isSignIn);
+  $('login-theme-picker').classList.toggle('hidden', isSignIn);
+  $('login-title').textContent = isSignIn ? 'Welcome back' : 'Welcome to Glass Chat';
+  $('login-sub').textContent = isSignIn ? 'Sign in with your name and code' : 'Set up your profile to get started';
+  $('join-btn').textContent = isSignIn ? 'Sign In' : 'Join Chat';
+  $('signin-toggle-btn').textContent = isSignIn ? "New here? Create a profile" : 'Already have an account? Sign in';
+  showFieldError('');
+}
+$('signin-toggle-btn').addEventListener('click', () => setLoginMode(loginMode === 'signin' ? 'signup' : 'signin'));
+
+async function refreshSuggestedCode() {
+  const name = $('name-input').value.trim() || 'user';
+  try {
+    const res = await fetch('/api/suggest-code?name=' + encodeURIComponent(name));
+    const data = await res.json();
+    if (data.code) $('signup-code-input').value = data.code;
+  } catch {}
+}
+$('signup-code-regen').addEventListener('click', refreshSuggestedCode);
+$('signup-code-input').addEventListener('input', e => {
+  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
+});
+$('signin-code-input').addEventListener('input', e => {
+  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
+});
 
 function showWelcomeScreen() {
   $('login-screen').classList.remove('hidden');
   if (!pendingSetupAvatar) {
     $('setup-avatar-preview').src = letterAvatarDataUrl($('name-input').value.trim(), getTheme(currentThemeId));
   }
+  refreshSuggestedCode();
   setTimeout(() => $('name-input').focus(), 50);
 }
 
@@ -394,6 +438,7 @@ async function initProfile() {
     if (data.exists) {
       myName = data.name;
       myAvatar = data.avatar || null;
+      if (data.code) setMyCode(data.code);
       localStorage.setItem('gc_name', myName);
       if (myAvatar) localStorage.setItem('gc_avatar', myAvatar); else localStorage.removeItem('gc_avatar');
       goStraightToChat();
@@ -403,7 +448,7 @@ async function initProfile() {
   // no saved profile for this IP (or the lookup failed) — fall back to
   // any locally cached profile before asking the person to set one up
   const cachedName = localStorage.getItem('gc_name');
-  if (cachedName) {
+  if (cachedName && myCode) {
     myName = cachedName;
     myAvatar = localStorage.getItem('gc_avatar') || null;
     goStraightToChat();
@@ -433,19 +478,41 @@ async function joinChat() {
     setTimeout(()=>nameInp.classList.remove('shake'),450);
     return;
   }
+
+  if (loginMode === 'signin') {
+    const code = $('signin-code-input').value.trim();
+    if (code.length !== 4) {
+      showFieldError('Enter your 4-digit code');
+      return;
+    }
+    showFieldError('');
+    $('join-btn').disabled = true;
+    myName = name;
+    setMyCode(code);
+    localStorage.setItem('gc_name', name);
+    socket.emit('join', { name, clientId, avatar: myAvatar, code: myCode });
+    return;
+  }
+
+  const signupCode = $('signup-code-input').value.trim();
+  if (signupCode.length !== 4) {
+    showFieldError('Pick a 4-digit code');
+    return;
+  }
   showFieldError('');
   $('join-btn').disabled = true;
   myName = name;
   myAvatar = pendingSetupAvatar || null;
+  setMyCode(signupCode);
   localStorage.setItem('gc_name', name);
   if (myAvatar) localStorage.setItem('gc_avatar', myAvatar); else localStorage.removeItem('gc_avatar');
   try {
     await fetch('/api/profile', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, avatar: myAvatar }),
+      body: JSON.stringify({ name, avatar: myAvatar, code: myCode }),
     });
   } catch {}
-  socket.emit('join', { name, clientId, avatar: myAvatar });
+  socket.emit('join', { name, clientId, avatar: myAvatar, code: myCode });
 }
 $('join-btn').addEventListener('click', joinChat);
 $('name-input').addEventListener('keydown', e => { if (e.key==='Enter') joinChat(); });
@@ -467,8 +534,9 @@ socket.on('error-msg', msg => {
   showToast(msg);
 });
 
-socket.on('join-success', () => {
+socket.on('join-success', (data = {}) => {
   $('join-btn').disabled = false;
+  if (data.code) setMyCode(data.code);
   updateHeaderProfile();
   const goToRoom = () => {
     const params = new URLSearchParams(location.search);
@@ -505,6 +573,7 @@ $('rail-profile-btn').addEventListener('click', e => {
   if (opening) {
     $('profile-menu-name-input').value = myName;
     $('profile-menu-avatar-preview').src = myAvatar || letterAvatarDataUrl(myName, getTheme(currentThemeId));
+    $('profile-code-input').value = myCode || '';
     $('profile-menu-error').textContent = '';
     pendingProfileMenuAvatar = undefined;
   }
@@ -518,6 +587,32 @@ $('profile-menu-avatar-upload').addEventListener('change', async e => {
     pendingProfileMenuAvatar = dataUrl;
     $('profile-menu-avatar-preview').src = dataUrl;
   } catch {}
+});
+$('profile-code-input').addEventListener('input', e => {
+  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
+});
+$('profile-code-save-btn').addEventListener('click', () => {
+  const newCode = $('profile-code-input').value.trim();
+  if (newCode.length !== 4) { $('profile-menu-error').textContent = 'Code must be 4 digits'; return; }
+  if (newCode === myCode) return;
+  $('profile-menu-error').textContent = '';
+  socket.emit('change-code', { newCode });
+});
+socket.on('code-changed', ({ code }) => {
+  setMyCode(code);
+  showToast('Your code is now ' + code);
+});
+$('delete-account-btn').addEventListener('click', () => {
+  if (!confirm('Delete your Glass Chat account? This removes your profile, code, and room memberships everywhere. Messages you\'ve already sent will stay. This cannot be undone.')) return;
+  socket.emit('delete-account');
+});
+socket.on('account-deleted', () => {
+  localStorage.removeItem('gc_name');
+  localStorage.removeItem('gc_avatar');
+  localStorage.removeItem('gc_code');
+  localStorage.removeItem('gc_room_recency');
+  showToast('Account deleted');
+  setTimeout(() => location.reload(), 600);
 });
 $('profile-menu-save-btn').addEventListener('click', async () => {
   const newName = $('profile-menu-name-input').value.trim();
@@ -563,7 +658,8 @@ async function signOut() {
 
   localStorage.removeItem('gc_name');
   localStorage.removeItem('gc_avatar');
-  myName = ''; myAvatar = null;
+  localStorage.removeItem('gc_code');
+  myName = ''; myAvatar = null; myCode = null;
   pendingSetupAvatar = null; pendingProfileMenuAvatar = undefined;
   hasJoinedOnce = false;
 
@@ -584,6 +680,8 @@ async function signOut() {
   $('name-input').value = '';
   showFieldError('');
   $('setup-avatar-preview').src = letterAvatarDataUrl('', getTheme(currentThemeId));
+  setLoginMode('signup');
+  refreshSuggestedCode();
 
   $('login-screen').classList.remove('hidden');
   $('login-card').classList.remove('leaving');
@@ -852,19 +950,23 @@ $('rd-back-btn').addEventListener('click', closeRecentlyDeleted);
    or duplicate-join bugs.
 ════════════════════════════════════════════════ */
 let gamesLoadedOnce = false;
+let inGamesView = false;
 function showGamesView() {
+  inGamesView = true;
   $('chat-view').classList.add('hidden');
   $('games-view').classList.remove('hidden');
   document.querySelectorAll('.rail-link').forEach(el => el.classList.add('active-page'));
   if (!gamesLoadedOnce && typeof loadGames === 'function') { gamesLoadedOnce = true; loadGames(); }
 }
 function showChatView() {
+  inGamesView = false;
   $('games-view').classList.add('hidden');
   $('chat-view').classList.remove('hidden');
   document.querySelectorAll('.rail-link').forEach(el => el.classList.remove('active-page'));
 }
-$('rail-games-btn').addEventListener('click', showGamesView);
-$('games-back-btn').addEventListener('click', showChatView);
+/* No back arrow — the sidebar is the only nav. Clicking Glass Games
+   again while already there just takes you back to chat. */
+$('rail-games-btn').addEventListener('click', () => inGamesView ? showChatView() : showGamesView());
 $('games-rail-toggle-btn').addEventListener('click', () => {
   $('side-rail').classList.contains('mobile-open') ? closeMobileRail() : openMobileRail();
 });
@@ -1389,7 +1491,7 @@ socket.on('user-count', n => { $('online-count').textContent = `${n} online`; })
 socket.on('disconnect', () => { if (hasJoinedOnce) showReconnectBanner(); });
 socket.on('connect', () => {
   if (hasJoinedOnce && myName) {
-    socket.emit('join', { name: myName, clientId, avatar: myAvatar });
+    socket.emit('join', { name: myName, clientId, avatar: myAvatar, code: myCode });
     if (currentRoomId !== 'general') socket.emit('switch-room', { roomId: currentRoomId });
   }
 });

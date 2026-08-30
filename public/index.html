@@ -27,12 +27,26 @@
       </button>
       <input type="file" id="setup-avatar-upload" accept="image/*" style="display:none"/>
     </div>
-    <h1 class="login-title">Welcome to Glass Chat</h1>
-    <p class="login-sub">Set up your profile to get started</p>
+    <h1 class="login-title" id="login-title">Welcome to Glass Chat</h1>
+    <p class="login-sub" id="login-sub">Set up your profile to get started</p>
     <input class="name-input" id="name-input" type="text" placeholder="Your name..." maxlength="20" autocomplete="off" spellcheck="false"/>
+
+    <div class="code-row" id="signup-code-row">
+      <label class="code-row-label">Your 4-digit code <span class="code-row-hint">so no one can impersonate you</span></label>
+      <div class="code-input-wrap">
+        <input class="code-input" id="signup-code-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000"/>
+        <button class="code-regen-btn" id="signup-code-regen" type="button" title="Get a new code">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <input class="code-input code-input-standalone hidden" id="signin-code-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="Your 4-digit code"/>
+
     <div class="field-error" id="field-error"></div>
     <button class="join-btn" id="join-btn">Join Chat</button>
-    <div class="theme-picker-inline">
+    <button class="signin-toggle-btn" id="signin-toggle-btn" type="button">Already have an account? Sign in</button>
+    <div class="theme-picker-inline" id="login-theme-picker">
       <div class="theme-picker-label">Theme</div>
       <div class="theme-mini-grid" id="theme-grid-login"></div>
     </div>
@@ -44,35 +58,6 @@
   <div class="app-layout" id="app-layout">
     <div class="rail-backdrop" id="rail-backdrop"></div>
     <nav class="glass side-rail" id="side-rail">
-      <div class="rail-section" data-section="profile">
-        <button class="rail-row" id="rail-profile-btn" type="button" title="Your profile">
-          <span class="rail-icon-btn rail-avatar-btn"><img id="rail-avatar" src="favicon-32.png" alt=""/></span>
-          <span class="rail-label" id="rail-profile-name">Profile</span>
-        </button>
-        <div class="rail-flyout" id="profile-flyout">
-          <div class="profile-menu-avatar-row">
-            <div class="profile-avatar-edit-wrap">
-              <img id="profile-menu-avatar-preview" src="apple-touch-icon.png" alt=""/>
-              <button class="avatar-edit-overlay" id="profile-menu-avatar-btn" title="Change photo" type="button">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-              </button>
-            </div>
-            <input type="file" id="profile-menu-avatar-upload" accept="image/*" style="display:none"/>
-          </div>
-          <label class="profile-menu-label" for="profile-menu-name-input">Display name</label>
-          <input class="profile-menu-name-input" id="profile-menu-name-input" type="text" maxlength="20" autocomplete="off" spellcheck="false"/>
-          <div class="profile-menu-error" id="profile-menu-error"></div>
-          <button class="profile-menu-save-btn" id="profile-menu-save-btn" type="button">Save changes</button>
-          <div class="profile-menu-divider"></div>
-          <div class="theme-picker-inline">
-            <div class="theme-picker-label">Theme</div>
-            <div class="theme-mini-grid" id="theme-grid-profile"></div>
-          </div>
-          <div class="profile-menu-divider"></div>
-          <button class="signout-btn" id="signout-btn" type="button">Sign Out</button>
-        </div>
-      </div>
-
       <div class="rail-section" data-section="notis">
         <button class="rail-row" id="rail-notis-btn" type="button" title="Notifications">
           <span class="rail-icon-btn">
@@ -120,6 +105,38 @@
           <span class="rail-icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><circle cx="15" cy="13" r="1"/><circle cx="18" cy="11" r="1"/><rect x="2" y="6" width="20" height="12" rx="6"/></svg></span>
           <span class="rail-label">Glass Games</span>
         </button>
+      </div>
+
+      <div class="rail-spacer"></div>
+
+      <div class="rail-section" data-section="profile">
+        <button class="rail-row" id="rail-profile-btn" type="button" title="Your profile">
+          <span class="rail-icon-btn rail-avatar-btn"><img id="rail-avatar" src="favicon-32.png" alt=""/></span>
+          <span class="rail-label" id="rail-profile-name">Profile</span>
+        </button>
+        <div class="rail-flyout" id="profile-flyout">
+          <div class="profile-menu-avatar-row">
+            <div class="profile-avatar-edit-wrap">
+              <img id="profile-menu-avatar-preview" src="apple-touch-icon.png" alt=""/>
+              <button class="avatar-edit-overlay" id="profile-menu-avatar-btn" title="Change photo" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+              </button>
+            </div>
+            <input type="file" id="profile-menu-avatar-upload" accept="image/*" style="display:none"/>
+          </div>
+          <input class="profile-menu-name-input" id="profile-menu-name-input" type="text" placeholder="Display name" maxlength="20" autocomplete="off" spellcheck="false"/>
+          <div class="profile-code-row">
+            <input class="profile-code-input" id="profile-code-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000"/>
+            <button class="profile-code-save-btn" id="profile-code-save-btn" type="button" title="Save code">✓</button>
+          </div>
+          <div class="profile-menu-error" id="profile-menu-error"></div>
+          <button class="profile-menu-save-btn" id="profile-menu-save-btn" type="button">Save changes</button>
+          <div class="theme-mini-grid" id="theme-grid-profile"></div>
+          <div class="profile-menu-footer-row">
+            <button class="signout-btn" id="signout-btn" type="button">Sign Out</button>
+            <button class="delete-account-btn" id="delete-account-btn" type="button">Delete Account</button>
+          </div>
+        </div>
       </div>
     </nav>
 
@@ -221,9 +238,6 @@
         <div class="header-left">
           <button class="icon-btn rail-toggle-btn" id="games-rail-toggle-btn" title="Menu" type="button">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
-          </button>
-          <button class="icon-btn" id="games-back-btn" title="Back to chat" type="button">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
           <span class="header-title">Glass Games</span>
         </div>
