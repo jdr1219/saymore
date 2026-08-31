@@ -172,6 +172,7 @@ let typingTimers = {};
 let hasJoinedOnce = false;
 let soundOn = localStorage.getItem('gc_sound') !== 'off';
 let notifOn = localStorage.getItem('gc_notif') === 'on';
+let sleepOn = localStorage.getItem('gc_sleep') === 'on';
 let lastDateKey = '';
 const GROUP_GAP = 60000;
 const AV_COLORS = ['#3fa9e0','#1f7fc9','#5ab3e6','#2f8fd4','#6cc2ec','#1a6bb8'];
@@ -490,7 +491,7 @@ async function joinChat() {
     myName = name;
     setMyCode(code);
     localStorage.setItem('gc_name', name);
-    socket.emit('join', { name, clientId, avatar: myAvatar, code: myCode });
+    socket.emit('join', { name, clientId, avatar: myAvatar, code: myCode, mode: 'signin' });
     return;
   }
 
@@ -512,7 +513,7 @@ async function joinChat() {
       body: JSON.stringify({ name, avatar: myAvatar, code: myCode }),
     });
   } catch {}
-  socket.emit('join', { name, clientId, avatar: myAvatar, code: myCode });
+  socket.emit('join', { name, clientId, avatar: myAvatar, code: myCode, mode: 'signup' });
 }
 $('join-btn').addEventListener('click', joinChat);
 $('name-input').addEventListener('keydown', e => { if (e.key==='Enter') joinChat(); });
@@ -530,14 +531,20 @@ socket.on('name-taken', () => {
 socket.on('error-msg', msg => {
   const profileSection = document.querySelector('.rail-section[data-section="profile"]');
   if (profileSection && profileSection.classList.contains('section-expanded')) { $('profile-menu-error').textContent = msg; return; }
-  if (!$('login-screen').classList.contains('hidden')) { showFieldError(msg); return; }
+  if (!$('login-screen').classList.contains('hidden')) { $('join-btn').disabled = false; showFieldError(msg); return; }
   showToast(msg);
 });
 
 socket.on('join-success', (data = {}) => {
   $('join-btn').disabled = false;
   if (data.code) setMyCode(data.code);
+  if (data.name) { myName = data.name; localStorage.setItem('gc_name', myName); }
+  if ('avatar' in data) {
+    myAvatar = data.avatar || null;
+    if (myAvatar) localStorage.setItem('gc_avatar', myAvatar); else localStorage.removeItem('gc_avatar');
+  }
   updateHeaderProfile();
+  if (sleepOn) socket.emit('set-sleep-mode', { on: true }); // re-sync a saved sleep-mode preference on (re)connect
   const goToRoom = () => {
     const params = new URLSearchParams(location.search);
     const room = params.get('room');
@@ -951,11 +958,16 @@ $('rd-back-btn').addEventListener('click', closeRecentlyDeleted);
 ════════════════════════════════════════════════ */
 let gamesLoadedOnce = false;
 let inGamesView = false;
+const GAMES_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><circle cx="15" cy="13" r="1"/><circle cx="18" cy="11" r="1"/><rect x="2" y="6" width="20" height="12" rx="6"/></svg>';
+const CHAT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
 function showGamesView() {
   inGamesView = true;
   $('chat-view').classList.add('hidden');
   $('games-view').classList.remove('hidden');
   document.querySelectorAll('.rail-link').forEach(el => el.classList.add('active-page'));
+  $('rail-games-icon').innerHTML = CHAT_ICON_SVG;
+  $('rail-games-label').textContent = 'Chat';
+  $('rail-games-btn').title = 'Back to chat';
   if (!gamesLoadedOnce && typeof loadGames === 'function') { gamesLoadedOnce = true; loadGames(); }
 }
 function showChatView() {
@@ -963,6 +975,9 @@ function showChatView() {
   $('games-view').classList.add('hidden');
   $('chat-view').classList.remove('hidden');
   document.querySelectorAll('.rail-link').forEach(el => el.classList.remove('active-page'));
+  $('rail-games-icon').innerHTML = GAMES_ICON_SVG;
+  $('rail-games-label').textContent = 'Glass Games';
+  $('rail-games-btn').title = 'Glass Games';
 }
 /* No back arrow — the sidebar is the only nav. Clicking Glass Games
    again while already there just takes you back to chat. */
@@ -1306,6 +1321,18 @@ $('search-input').addEventListener('input', e => {
   });
   if (first) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
 });
+
+/* ── sleep mode (do-not-disturb): while on, notifications queue on the
+   server and all arrive at once the moment it's switched back off ── */
+$('sleep-btn').addEventListener('click', () => {
+  sleepOn = !sleepOn;
+  localStorage.setItem('gc_sleep', sleepOn ? 'on' : 'off');
+  $('sleep-btn').classList.toggle('active', sleepOn);
+  socket.emit('set-sleep-mode', { on: sleepOn });
+  showToast(sleepOn ? 'Sleep mode on — notifications will hold until you turn it off' : 'Sleep mode off — catching you up now');
+});
+if (sleepOn) $('sleep-btn').classList.add('active');
+socket.on('sleep-mode-updated', ({ on } = {}) => { $('sleep-btn').classList.toggle('active', !!on); });
 
 /* ── scroll to bottom / unread ── */
 function isNearBottom() {

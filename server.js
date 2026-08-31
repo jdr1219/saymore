@@ -84,7 +84,7 @@ app.get("/api/people/search", (req, res) => {
     .filter(p => !q || p.name.toLowerCase().includes(q))
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
     .slice(0, 20)
-    .map(p => ({ name: p.name }));
+    .map(p => ({ name: p.name, avatar: p.avatar || null }));
   res.json(results);
 });
 
@@ -289,8 +289,16 @@ const rooms         = loadRooms();          // roomId -> RoomMeta (excludes 'gen
 const roomMessages  = loadRoomMessages();   // roomId -> [msg,...]  (excludes 'general', which uses `history`)
 const notifications = loadNotifications();  // usernameLower -> [notif,...]
 const GENERAL_ROOM = { id: "general", name: "General", icon: "💬" };
-const users      = {};   // socket.id -> { name, clientId, avatar, roomId }
+const users      = {};   // socket.id -> { name, clientId, avatar, roomId, unread }
 const rateLimits = {};
+/* ── Sleep mode (do-not-disturb) ──
+   Runtime-only (not persisted to disk) — a session toggle, not an
+   account setting. While a name is "asleep", notifyUser() still
+   records the notification (so it's not lost, and shows up in the
+   inbox) but withholds the live push; turning sleep mode back off
+   flushes everything that queued up while it was on. */
+const sleepUsers = new Set();      // usernameLower currently asleep
+const pendingPush = {};            // usernameLower -> [notif, ...] queued while asleep
 
 function slugify(str) {
   return String(str || "").toLowerCase().trim()
@@ -352,6 +360,22 @@ function broadcastRoomToMembers(room) {
     if (memberNames.has(x.name.toLowerCase())) io.to(sid).emit("room-updated", publicRoomInfo(room, x.clientId));
   });
 }
+/* Live unread badges in the sidebar: whenever a message lands in a
+   room, everyone who belongs there but isn't currently looking at it
+   gets their count bumped (and told about it), so switching rooms
+   shows what they missed at a glance. */
+function bumpUnread(rid, senderName) {
+  const targets = rid === "general"
+    ? Object.entries(users)
+    : Object.entries(users).filter(([, x]) => isMember(rooms[rid], x.clientId));
+  targets.forEach(([sid, x]) => {
+    if (x.name === senderName) return;
+    if (x.roomId === rid) return; // actively viewing it — no unread
+    x.unread = x.unread || {};
+    x.unread[rid] = (x.unread[rid] || 0) + 1;
+    io.to(sid).emit("unread-update", { roomId: rid, count: x.unread[rid] });
+  });
+}
 function findClientIdByName(name) {
   const key = String(name || "").toLowerCase(); if (!key) return null;
   let found = null, latest = 0;
@@ -366,6 +390,11 @@ function notifyUser(name, notif) {
   notifications[key].unshift(notif);
   notifications[key] = notifications[key].slice(0, 50);
   saveNotificationsDebounced();
+  if (sleepUsers.has(key)) {
+    if (!pendingPush[key]) pendingPush[key] = [];
+    pendingPush[key].push(notif);
+    return; // held until sleep mode turns back off
+  }
   const target = Object.entries(users).find(([, u]) => u.name.toLowerCase() === key);
   if (target) io.to(target[0]).emit("notification", notif);
 }
@@ -377,6 +406,13 @@ function getRoomStore(roomId) {
 function saveRoomStoreDebounced(roomId) {
   if (roomId === "general") return saveDebounced();
   return saveRoomMessagesDebounced();
+}
+
+/* Everyone gets their own personalized online count — total connections
+   minus themself — so "3 online" never counts the person looking at it. */
+function broadcastUserCounts() {
+  const total = Object.keys(users).length;
+  Object.keys(users).forEach(sid => io.to(sid).emit("user-count", Math.max(0, total - 1)));
 }
 
 function evictStaleSocket(clientId, exceptSocketId) {
@@ -487,7 +523,7 @@ async function fetchPreview(url) {
 io.on("connection", socket => {
   log.info("connect", { id: socket.id });
 
-  socket.on("join", ({ name, clientId, avatar, code } = {}) => {
+  socket.on("join", ({ name, clientId, avatar, code, mode } = {}) => {
     const username = sanitize(name, 24);
     const cid = sanitize(clientId, 64) || null;
     if (!username) return socket.emit("error-msg", "Invalid name");
@@ -500,25 +536,53 @@ io.on("connection", socket => {
     // 4-digit code = a lightweight account (name#code) so a name can't
     // be impersonated. Knowing the right code for a name signs you in —
     // from a new browser this migrates your room standing over to it.
+    // `mode` tells us which the person actually meant, so two different
+    // people can never collide on the same name+code: signup fails if
+    // that combo is already someone else's account, and sign-in fails
+    // if no such account exists (instead of silently minting one).
     let finalCode = cleanCode(code);
     let identity = null;
     if (finalCode.length === 4) {
       const key = identityKey(username, finalCode);
       identity = identities[key];
-      if (identity) {
+
+      if (mode === "signup") {
+        if (identity && identity.clientId !== cid) {
+          return socket.emit("error-msg", "That name + code is already taken — pick a different code");
+        }
+        if (!identity) {
+          identity = { name: username, code: finalCode, avatar: validAvatar(avatar), clientId: cid, updatedAt: Date.now() };
+          identities[key] = identity;
+        } else {
+          identity.avatar = validAvatar(avatar) || identity.avatar || null;
+          identity.clientId = cid;
+          identity.updatedAt = Date.now();
+        }
+      } else if (mode === "signin") {
+        if (!identity) return socket.emit("error-msg", "No account found with that name and code");
         if (identity.clientId && identity.clientId !== cid) migrateClientId(identity.clientId, cid);
         identity.clientId = cid;
         identity.avatar = validAvatar(avatar) || identity.avatar || null;
         identity.updatedAt = Date.now();
       } else {
-        identity = { name: username, code: finalCode, avatar: validAvatar(avatar), clientId: cid, updatedAt: Date.now() };
-        identities[key] = identity;
+        // legacy/auto path (returning-profile flow with a cached code) —
+        // keep the old lenient behavior so existing sessions don't break
+        if (identity) {
+          if (identity.clientId && identity.clientId !== cid) migrateClientId(identity.clientId, cid);
+          identity.clientId = cid;
+          identity.avatar = validAvatar(avatar) || identity.avatar || null;
+          identity.updatedAt = Date.now();
+        } else {
+          identity = { name: username, code: finalCode, avatar: validAvatar(avatar), clientId: cid, updatedAt: Date.now() };
+          identities[key] = identity;
+        }
       }
       saveIdentitiesDebounced();
     }
 
     if (cid) evictStaleSocket(cid, socket.id); // drop any earlier session from this same browser
-    users[socket.id] = { name: username, clientId: cid, avatar: validAvatar(avatar) || identity?.avatar || null, roomId: "general", code: finalCode || null };
+    const finalAvatar = validAvatar(avatar) || identity?.avatar || null;
+    users[socket.id] = { name: username, clientId: cid, avatar: finalAvatar, roomId: "general", code: finalCode || null, unread: {} };
     socket.join("general");
     log.info("join", { username });
 
@@ -528,17 +592,17 @@ io.on("connection", socket => {
     if (cid) {
       const ip = getSocketIp(socket.handshake);
       const existing = profiles[ip] || {};
-      profiles[ip] = { name: username, avatar: validAvatar(avatar) || existing.avatar || null, code: finalCode || existing.code || null, clientId: cid, updatedAt: Date.now() };
+      profiles[ip] = { name: username, avatar: finalAvatar || existing.avatar || null, code: finalCode || existing.code || null, clientId: cid, updatedAt: Date.now() };
       saveProfilesDebounced();
     }
 
-    socket.emit("join-success", { code: finalCode || null });
+    socket.emit("join-success", { code: finalCode || null, name: username, avatar: finalAvatar });
     socket.emit("history", history.slice(-PAGE_SIZE).map(publicMsg));
     socket.emit("history-has-more", history.length > PAGE_SIZE);
     socket.emit("my-rooms", myRoomsList(cid));
     socket.emit("notifications", notifications[username.toLowerCase()] || []);
     socket.broadcast.emit("system", `${username} joined`);
-    io.emit("user-count", Object.keys(users).length);
+    broadcastUserCounts();
   });
 
   /* Change your 4-digit code from profile settings — must stay
@@ -589,7 +653,7 @@ io.on("connection", socket => {
 
     socket.emit("account-deleted");
     delete users[socket.id]; delete rateLimits[socket.id];
-    io.emit("user-count", Object.keys(users).length);
+    broadcastUserCounts();
     socket.disconnect(true);
   });
 
@@ -643,6 +707,7 @@ io.on("connection", socket => {
     saveRoomsDebounced();
     log.info("room-create", { id, by: u.name });
     socket.emit("room-created", publicRoomInfo(room, u.clientId));
+    socket.emit("room-updated", publicRoomInfo(room, u.clientId)); // so it shows up in the sidebar's room list right away, not just search
   });
 
   socket.on("switch-room", ({ roomId } = {}) => {
@@ -655,6 +720,9 @@ io.on("connection", socket => {
     socket.leave(u.roomId);
     socket.join(rid);
     u.roomId = rid;
+    u.unread = u.unread || {};
+    u.unread[rid] = 0;
+    socket.emit("unread-update", { roomId: rid, count: 0 });
     const store = getRoomStore(rid);
     socket.emit("room-history", {
       roomId: rid,
@@ -790,6 +858,24 @@ io.on("connection", socket => {
     broadcastRoomToMembers(room);
   });
 
+  /* Sleep mode: while on, notifications land in the inbox but don't
+     push live; turning it off flushes whatever queued up, all at once. */
+  socket.on("set-sleep-mode", ({ on } = {}) => {
+    const u = users[socket.id]; if (!u) return;
+    const key = u.name.toLowerCase();
+    if (on) {
+      sleepUsers.add(key);
+    } else {
+      const wasAsleep = sleepUsers.delete(key);
+      if (wasAsleep) {
+        const queued = pendingPush[key] || [];
+        delete pendingPush[key];
+        queued.forEach(n => socket.emit("notification", n));
+      }
+    }
+    socket.emit("sleep-mode-updated", { on: !!on });
+  });
+
   socket.on("mark-notification-read", ({ id } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const list = notifications[u.name.toLowerCase()] || [];
@@ -884,6 +970,7 @@ io.on("connection", socket => {
     if (store.length > MAX_HISTORY) store.shift();
     saveRoomStoreDebounced(rid);
     io.to(rid).emit("message", publicMsg(msg));
+    bumpUnread(rid, u.name);
 
     const urlMatch = text.match(/https?:\/\/[^\s<]+/);
     if (urlMatch) {
@@ -952,7 +1039,7 @@ io.on("connection", socket => {
     if (username) {
       log.info("leave", { username });
       io.emit("system", `${username} left`);
-      io.emit("user-count", Object.keys(users).length);
+      broadcastUserCounts();
     }
   });
 });

@@ -26,6 +26,7 @@ let currentRoomId = 'general';
 let currentRoomInfo = { id: 'general', name: 'General', icon: '💬', isDefault: true, isAdmin: false, isCoAdmin: false, isPrivileged: false, members: [], bans: [] };
 let myRooms = [];
 let notificationsList = [];
+let unreadMap = {}; // roomId -> unread count, kept in sync via the 'unread-update' socket event
 
 /* ── recent-rooms tracking (client-side, per browser) ── */
 function touchRoomRecency(roomId) {
@@ -87,6 +88,14 @@ function renderRoomList() {
       badge.className = 'room-row-admin-badge';
       badge.textContent = room.isAdmin ? 'ADMIN' : 'CO-ADMIN';
       row.appendChild(badge);
+    }
+
+    const unread = unreadMap[room.id] || 0;
+    if (unread > 0 && room.id !== currentRoomId) {
+      const dot = document.createElement('span');
+      dot.className = 'room-row-unread-badge';
+      dot.textContent = unread > 9 ? '9+' : String(unread);
+      row.appendChild(dot);
     }
 
     row.addEventListener('click', () => switchToRoom(room.id));
@@ -173,7 +182,7 @@ function openRoomSettings(anchorEl) {
   inviteRow.className = 'rs-invite-row';
   const inviteInput = document.createElement('input');
   inviteInput.className = 'rs-invite-input';
-  inviteInput.placeholder = 'Invite by name...';
+  inviteInput.placeholder = 'Search people to invite...';
   inviteInput.autocomplete = 'off';
   const inviteBtn = document.createElement('button');
   inviteBtn.className = 'rs-action-btn rs-promote'; inviteBtn.textContent = 'Invite';
@@ -185,6 +194,7 @@ function openRoomSettings(anchorEl) {
     if (!name) return;
     socket.emit('invite-to-room', { roomId: currentRoomId, name, asCoAdmin });
     inviteInput.value = '';
+    inviteResults.innerHTML = '';
     showToast(`Invite sent to ${name}`);
   }
   inviteBtn.addEventListener('click', () => doInvite(false));
@@ -192,6 +202,47 @@ function openRoomSettings(anchorEl) {
   inviteInput.addEventListener('keydown', e => { if (e.key === 'Enter') doInvite(false); });
   inviteRow.appendChild(inviteInput); inviteRow.appendChild(inviteBtn); inviteRow.appendChild(inviteCoBtn);
   panel.appendChild(inviteRow);
+
+  /* Live results as you type — profiles only (not rooms), each with
+     its pfp, so you can see who you're actually inviting. Clicking a
+     result fills the exact name in; the Invite/+Co buttons above send it. */
+  const inviteResults = document.createElement('div');
+  inviteResults.className = 'rs-invite-results';
+  panel.appendChild(inviteResults);
+  let inviteSearchTimer = null;
+  function pfpSrc(name, avatar) {
+    if (avatar) return avatar;
+    if (typeof letterAvatarDataUrl === 'function' && typeof getTheme === 'function') {
+      return letterAvatarDataUrl(name, getTheme(currentThemeId));
+    }
+    return '';
+  }
+  async function runInviteSearch(q) {
+    if (!q) { inviteResults.innerHTML = ''; return; }
+    try {
+      const res = await fetch('/api/people/search?q=' + encodeURIComponent(q));
+      const people = (await res.json()).filter(p => p.name.toLowerCase() !== sbMyName().toLowerCase());
+      inviteResults.innerHTML = '';
+      if (!people.length) { inviteResults.innerHTML = '<div class="rs-invite-empty">No matching people</div>'; return; }
+      people.forEach(p => {
+        const row = document.createElement('div');
+        row.className = 'rs-invite-result-row';
+        const img = document.createElement('img');
+        img.className = 'rs-invite-result-pfp';
+        img.src = pfpSrc(p.name, p.avatar);
+        const name = document.createElement('span');
+        name.className = 'rs-invite-result-name'; name.textContent = p.name;
+        row.appendChild(img); row.appendChild(name);
+        row.addEventListener('click', () => { inviteInput.value = p.name; inviteResults.innerHTML = ''; inviteInput.focus(); });
+        inviteResults.appendChild(row);
+      });
+    } catch { inviteResults.innerHTML = ''; }
+  }
+  inviteInput.addEventListener('input', e => {
+    clearTimeout(inviteSearchTimer);
+    const q = e.target.value.trim();
+    inviteSearchTimer = setTimeout(() => runInviteSearch(q), 200);
+  });
 
   const list = document.createElement('div');
   list.className = 'rs-members-list';
@@ -374,96 +425,50 @@ function updateNotiBadge() {
   if (badge) badge.hidden = !notificationsList.some(n => !n.read);
 }
 
-/* ── room + people search ── */
+/* ── room search (sidebar rail) — rooms only. Searching for a
+   specific person to invite happens from inside a room's settings
+   panel instead (see openRoomSettings' invite row below). ── */
 let roomSearchTimer = null;
 async function runRoomSearch(q) {
   try {
-    const [roomsRes, peopleRes] = await Promise.all([
-      fetch('/api/rooms/search?q=' + encodeURIComponent(q)),
-      fetch('/api/people/search?q=' + encodeURIComponent(q)),
-    ]);
-    renderRoomSearchResults(await roomsRes.json(), await peopleRes.json());
-  } catch { renderRoomSearchResults([], []); }
+    const res = await fetch('/api/rooms/search?q=' + encodeURIComponent(q));
+    renderRoomSearchResults(await res.json());
+  } catch { renderRoomSearchResults([]); }
 }
-function renderRoomSearchResults(rooms, people) {
+function renderRoomSearchResults(rooms) {
   const box = $('room-search-results');
   box.innerHTML = '';
   const myIds = new Set(myRooms.map(r => r.id));
   const roomResults = (rooms || []).filter(r => !myIds.has(r.id));
-  const peopleResults = (people || []).filter(p => p.name.toLowerCase() !== sbMyName().toLowerCase());
-  const canInvite = !!currentRoomInfo.isPrivileged;
 
-  if (!roomResults.length && !peopleResults.length) {
-    box.innerHTML = '<div class="room-search-empty">No matches found</div>';
+  if (!roomResults.length) {
+    box.innerHTML = '<div class="room-search-empty">No matching rooms</div>';
     return;
   }
 
-  if (roomResults.length) {
-    const label = document.createElement('div');
-    label.className = 'search-group-label'; label.textContent = 'Rooms';
-    box.appendChild(label);
-    roomResults.forEach(r => {
-      const row = document.createElement('div');
-      row.className = 'room-search-row';
-      const icon = document.createElement('span');
-      icon.className = 'room-search-row-icon'; icon.textContent = r.icon || '💬';
-      row.appendChild(icon);
-      const info = document.createElement('div');
-      info.className = 'room-search-row-info';
-      const name = document.createElement('div');
-      name.className = 'room-search-row-name'; name.textContent = r.name;
-      const meta = document.createElement('div');
-      meta.className = 'room-search-row-meta'; meta.textContent = `${r.memberCount} member${r.memberCount===1?'':'s'}`;
-      info.appendChild(name); info.appendChild(meta);
-      row.appendChild(info);
-      const btn = document.createElement('button');
-      btn.className = 'room-search-join-btn'; btn.textContent = 'Ask to join';
-      btn.addEventListener('click', () => {
-        socket.emit('request-join', { roomId: r.id });
-        btn.textContent = 'Requested'; btn.disabled = true;
-      });
-      row.appendChild(btn);
-      box.appendChild(row);
+  roomResults.forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'room-search-row';
+    const icon = document.createElement('span');
+    icon.className = 'room-search-row-icon'; icon.textContent = r.icon || '💬';
+    row.appendChild(icon);
+    const info = document.createElement('div');
+    info.className = 'room-search-row-info';
+    const name = document.createElement('div');
+    name.className = 'room-search-row-name'; name.textContent = r.name;
+    const meta = document.createElement('div');
+    meta.className = 'room-search-row-meta'; meta.textContent = `${r.memberCount} member${r.memberCount===1?'':'s'}`;
+    info.appendChild(name); info.appendChild(meta);
+    row.appendChild(info);
+    const btn = document.createElement('button');
+    btn.className = 'room-search-join-btn'; btn.textContent = 'Ask to join';
+    btn.addEventListener('click', () => {
+      socket.emit('request-join', { roomId: r.id });
+      btn.textContent = 'Requested'; btn.disabled = true;
     });
-  }
-
-  if (peopleResults.length) {
-    const label = document.createElement('div');
-    label.className = 'search-group-label'; label.textContent = 'People';
-    box.appendChild(label);
-    peopleResults.forEach(p => {
-      const row = document.createElement('div');
-      row.className = 'room-search-row';
-      const icon = document.createElement('span');
-      icon.className = 'room-search-row-icon'; icon.textContent = '👤';
-      row.appendChild(icon);
-      const info = document.createElement('div');
-      info.className = 'room-search-row-info';
-      const name = document.createElement('div');
-      name.className = 'room-search-row-name'; name.textContent = p.name;
-      info.appendChild(name);
-      row.appendChild(info);
-      if (canInvite) {
-        const inviteBtn = document.createElement('button');
-        inviteBtn.className = 'room-search-join-btn'; inviteBtn.textContent = 'Invite';
-        inviteBtn.title = `Invite to ${currentRoomInfo.name}`;
-        inviteBtn.addEventListener('click', () => {
-          socket.emit('invite-to-room', { roomId: currentRoomId, name: p.name, asCoAdmin: false });
-          inviteBtn.textContent = 'Invited'; inviteBtn.disabled = true;
-        });
-        row.appendChild(inviteBtn);
-        const coBtn = document.createElement('button');
-        coBtn.className = 'room-search-join-btn co'; coBtn.textContent = '+Co-admin';
-        coBtn.title = `Invite as co-admin of ${currentRoomInfo.name}`;
-        coBtn.addEventListener('click', () => {
-          socket.emit('invite-to-room', { roomId: currentRoomId, name: p.name, asCoAdmin: true });
-          coBtn.textContent = 'Requested'; coBtn.disabled = true;
-        });
-        row.appendChild(coBtn);
-      }
-      box.appendChild(row);
-    });
-  }
+    row.appendChild(btn);
+    box.appendChild(row);
+  });
 }
 
 /* ── socket handlers (sidebar-relevant only; app.js handles the
@@ -519,6 +524,11 @@ socket.on('room-history', ({ roomId, room }) => {
   renderRoomList();
 });
 socket.on('info-msg', msg => showToast(msg));
+socket.on('unread-update', ({ roomId, count } = {}) => {
+  if (!roomId) return;
+  unreadMap[roomId] = count || 0;
+  renderRoomList();
+});
 
 function showToast(msg) {
   let t = document.getElementById('gc-toast');

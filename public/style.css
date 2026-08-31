@@ -24,6 +24,11 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; over
 #bg { position: fixed; inset: 0; z-index: 0; }
 #pcanvas { position: fixed; inset: 0; z-index: 999; pointer-events: none; }
 .screen { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 16px; }
+/* Generic "hidden" utility — !important so it always wins regardless of
+   how specific the element's own display rule is. Several elements
+   (signup code row, avatar picker, theme picker) toggle this class via
+   JS with nothing to back it up otherwise, so nothing actually hid. */
+.hidden { display: none !important; }
 .screen.hidden { display: none; }
 
 .glass {
@@ -106,23 +111,23 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; over
 .header-title { font-size:15px; font-weight:700; color:var(--ink); letter-spacing:-.3px; max-width:130px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .header-right { display:flex; align-items:center; gap:6px; }
 
-.profile-menu-avatar-row { display:flex; justify-content:center; margin-bottom:14px; }
+.profile-menu-avatar-row { display:flex; justify-content:center; margin-bottom:20px; }
 .profile-avatar-edit-wrap { position:relative; width:64px; height:64px; }
 .profile-avatar-edit-wrap img { width:64px; height:64px; border-radius:50%; object-fit:cover; display:block; box-shadow:0 4px 12px rgba(15,40,60,.2); }
-.profile-menu-label { display:block; font-size:10.5px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
-.profile-menu-name-input { width:100%; padding:9px 12px; background:rgba(255,255,255,0.55); border:1.5px solid rgba(255,255,255,0.6); border-radius:10px; font-size:13.5px; font-family:inherit; font-weight:600; color:var(--ink); outline:none; margin-bottom:6px; transition:border-color .2s var(--ease); }
+.profile-menu-label { display:block; font-size:10.5px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px; }
+.profile-menu-name-input { width:100%; padding:11px 14px; background:rgba(255,255,255,0.55); border:1.5px solid rgba(255,255,255,0.6); border-radius:10px; font-size:13.5px; font-family:inherit; font-weight:600; color:var(--ink); outline:none; margin-bottom:14px; transition:border-color .2s var(--ease); }
 .profile-menu-name-input:focus { border-color:color-mix(in srgb, var(--blue) 65%, transparent); }
 
-.profile-code-row { display:flex; gap:6px; margin-bottom:6px; }
-.profile-code-input { flex:1; min-width:0; padding:8px 10px; background:rgba(255,255,255,0.55); border:1.5px solid rgba(255,255,255,0.6); border-radius:10px; font-size:14px; font-family:inherit; font-weight:700; letter-spacing:2px; text-align:center; color:var(--ink); outline:none; }
-.profile-code-save-btn { width:34px; flex-shrink:0; border-radius:10px; border:none; background:var(--blue); color:#fff; font-weight:800; font-size:13px; cursor:pointer; }
+.profile-code-row { display:flex; gap:8px; margin-bottom:14px; }
+.profile-code-input { flex:1; min-width:0; padding:10px; background:rgba(255,255,255,0.55); border:1.5px solid rgba(255,255,255,0.6); border-radius:10px; font-size:14px; font-family:inherit; font-weight:700; letter-spacing:2px; text-align:center; color:var(--ink); outline:none; }
+.profile-code-save-btn { width:38px; flex-shrink:0; border-radius:10px; border:none; background:var(--blue); color:#fff; font-weight:800; font-size:13px; cursor:pointer; }
 .profile-code-save-btn:hover { background:var(--blue-deep); }
-.profile-menu-error { font-size:11px; color:var(--alert); font-weight:600; min-height:14px; margin-bottom:6px; }
-.profile-menu-save-btn { width:100%; padding:9px; background:linear-gradient(135deg,var(--blue),var(--blue-deep)); border:none; border-radius:10px; color:#fff; font-size:12.5px; font-weight:700; font-family:inherit; cursor:pointer; transition:transform .15s var(--ease),opacity .15s; }
+.profile-menu-error { font-size:11px; color:var(--alert); font-weight:600; min-height:14px; margin-bottom:10px; }
+.profile-menu-save-btn { width:100%; padding:11px; background:linear-gradient(135deg,var(--blue),var(--blue-deep)); border:none; border-radius:10px; color:#fff; font-size:12.5px; font-weight:700; font-family:inherit; cursor:pointer; transition:transform .15s var(--ease),opacity .15s; }
 .profile-menu-save-btn:hover { transform:translateY(-1px); }
 .profile-menu-save-btn:disabled { opacity:.6; cursor:default; transform:none; }
 
-.profile-menu-divider { height:1px; background:rgba(21,36,58,.10); margin:14px 0; }
+.profile-menu-divider { height:1px; background:rgba(21,36,58,.10); margin:20px 0; }
 
 /* ── theme picker — a grid of small color swatches, Chrome-theme-settings
    style. Used inline on the welcome/setup card and inside the profile menu. ── */
@@ -138,11 +143,11 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; over
 .theme-check { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:13px; height:13px; color:#fff; filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.45)); pointer-events:none; }
 .theme-mini-swatch.active .theme-check { display:block; }
 
-.profile-menu-footer-row { display:flex; gap:6px; margin-top:2px; }
-.signout-btn { flex:1; padding:9px 4px; background:rgba(255,255,255,0.3); border:1.5px solid rgba(255,255,255,0.45); border-radius:10px; color:var(--ink); font-size:11.5px; font-weight:700; font-family:inherit; cursor:pointer; transition:background .15s,transform .15s; }
+.profile-menu-footer-row { display:flex; gap:10px; margin-top:8px; }
+.signout-btn { flex:1; padding:11px 4px; background:rgba(255,255,255,0.3); border:1.5px solid rgba(255,255,255,0.45); border-radius:10px; color:var(--ink); font-size:11.5px; font-weight:700; font-family:inherit; cursor:pointer; transition:background .15s,transform .15s; }
 .signout-btn:hover { background:rgba(255,255,255,0.45); }
 .signout-btn:active { transform:scale(.98); }
-.delete-account-btn { flex:1; padding:9px 4px; background:rgba(224,63,63,0.12); border:1.5px solid rgba(224,63,63,0.3); border-radius:10px; color:#c0392b; font-size:11.5px; font-weight:700; font-family:inherit; cursor:pointer; transition:background .15s,transform .15s; }
+.delete-account-btn { flex:1; padding:11px 4px; background:rgba(224,63,63,0.12); border:1.5px solid rgba(224,63,63,0.3); border-radius:10px; color:#c0392b; font-size:11.5px; font-weight:700; font-family:inherit; cursor:pointer; transition:background .15s,transform .15s; }
 .delete-account-btn:hover { background:rgba(224,63,63,0.22); }
 .delete-account-btn:active { transform:scale(.98); }
 
@@ -424,9 +429,10 @@ body.select-mode-active .bubble { cursor:pointer; }
 
 .rail-flyout { max-height:0; opacity:0; overflow:hidden; padding:0 15px; transition:max-height .3s var(--ease), opacity .22s var(--ease), padding .3s var(--ease); }
 .side-rail.pinned .rail-section.section-expanded .rail-flyout { max-height:280px; opacity:1; overflow-y:auto; padding:4px 15px 14px; }
-.side-rail.pinned .rail-section[data-section="profile"].section-expanded .rail-flyout { max-height:420px; }
+.side-rail.pinned .rail-section[data-section="profile"].section-expanded .rail-flyout { max-height:460px; }
 @media (hover:hover) and (pointer:fine) {
   .side-rail:hover .rail-section.section-expanded .rail-flyout { max-height:280px; opacity:1; overflow-y:auto; padding:4px 15px 14px; }
+  .side-rail:hover .rail-section[data-section="profile"].section-expanded .rail-flyout { max-height:460px; }
 }
 .rail-flyout::-webkit-scrollbar { width:3px; }
 .rail-flyout::-webkit-scrollbar-thumb { background:rgba(21,36,58,0.16); border-radius:3px; }
@@ -434,18 +440,19 @@ body.select-mode-active .bubble { cursor:pointer; }
 .rail-toggle-btn { display:none; }
 
 /* Rooms / search / notification lists inside a flyout */
-.room-list, .noti-list { display:flex; flex-direction:column; gap:6px; }
-.room-row { display:flex; align-items:center; gap:9px; padding:7px 8px; border-radius:12px; cursor:pointer; background:rgba(255,255,255,0.16); border:1px solid rgba(255,255,255,0.24); transition:background .15s; }
+.room-list, .noti-list { display:flex; flex-direction:column; gap:4px; }
+.room-row { display:flex; align-items:center; gap:8px; padding:5px 7px; border-radius:11px; cursor:pointer; background:rgba(255,255,255,0.16); border:1px solid rgba(255,255,255,0.24); transition:background .15s; }
 .room-row:hover { background:color-mix(in srgb, var(--blue) 16%, transparent); }
 .room-row.active { background:color-mix(in srgb, var(--blue) 28%, transparent); border-color:color-mix(in srgb, var(--blue) 40%, transparent); }
-.room-row-icon { font-size:16px; width:20px; text-align:center; flex-shrink:0; }
-.room-row-name { flex:1; min-width:0; font-size:12.5px; font-weight:700; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.room-row-admin-badge { font-size:9px; background:var(--blue); color:#fff; padding:1px 5px; border-radius:6px; font-weight:800; flex-shrink:0; letter-spacing:.2px; }
-.room-row-icon-edit { width:20px; height:20px; border-radius:50%; border:none; background:transparent; color:var(--ink-soft); display:flex; align-items:center; justify-content:center; flex-shrink:0; cursor:pointer; }
+.room-row-icon { font-size:14px; width:18px; text-align:center; flex-shrink:0; }
+.room-row-name { flex:1; min-width:0; font-size:12px; font-weight:700; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.room-row-admin-badge { font-size:8.5px; background:var(--blue); color:#fff; padding:1px 5px; border-radius:6px; font-weight:800; flex-shrink:0; letter-spacing:.2px; }
+.room-row-icon-edit { width:18px; height:18px; border-radius:50%; border:none; background:transparent; color:var(--ink-soft); display:flex; align-items:center; justify-content:center; flex-shrink:0; cursor:pointer; }
 .room-row-icon-edit:hover { background:color-mix(in srgb, var(--blue) 20%, transparent); color:var(--blue-deep); }
-.room-row-icon-edit svg { width:12px; height:12px; }
+.room-row-icon-edit svg { width:11px; height:11px; }
+.room-row-unread-badge { font-size:9.5px; font-weight:800; color:#fff; background:var(--blue-deep); min-width:16px; height:16px; padding:0 4px; border-radius:9px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
 
-.rail-create-btn { display:flex; align-items:center; justify-content:center; gap:6px; width:100%; margin-top:8px; padding:8px; border-radius:12px; background:color-mix(in srgb, var(--blue) 14%, transparent); border:1px dashed color-mix(in srgb, var(--blue) 45%, transparent); color:var(--blue-deep); font-weight:700; font-size:12.5px; font-family:inherit; cursor:pointer; }
+.rail-create-btn { display:flex; align-items:center; justify-content:center; gap:6px; width:100%; margin-top:6px; padding:7px; border-radius:11px; background:color-mix(in srgb, var(--blue) 14%, transparent); border:1px dashed color-mix(in srgb, var(--blue) 45%, transparent); color:var(--blue-deep); font-weight:700; font-size:12px; font-family:inherit; cursor:pointer; }
 .rail-create-btn:hover { background:color-mix(in srgb, var(--blue) 22%, transparent); }
 .rail-create-btn svg { width:13px; height:13px; }
 .rail-create-form { display:flex; gap:6px; margin-top:8px; }
@@ -457,12 +464,24 @@ body.select-mode-active .bubble { cursor:pointer; }
 .room-search-results { display:flex; flex-direction:column; gap:6px; }
 .room-search-row { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:12px; background:rgba(255,255,255,.16); }
 .room-search-row-icon { font-size:15px; width:18px; text-align:center; flex-shrink:0; }
+.room-search-row-pfp { width:26px; height:26px; border-radius:50%; object-fit:cover; flex-shrink:0; }
 .room-search-row-info { flex:1; min-width:0; }
 .room-search-row-name { font-size:12.5px; font-weight:700; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .room-search-row-meta { font-size:10px; color:var(--ink-soft); }
 .room-search-join-btn { font-size:10.5px; font-weight:700; padding:5px 9px; border-radius:9px; border:none; background:var(--blue); color:#fff; cursor:pointer; flex-shrink:0; white-space:nowrap; }
 .room-search-join-btn:disabled { opacity:.55; cursor:default; }
 .room-search-empty, .room-list-empty, .noti-empty { font-size:11.5px; color:var(--ink-soft); text-align:center; padding:12px 4px; font-style:italic; }
+
+/* ── invite-by-name search dropdown (room settings panel) ── */
+.rs-invite-results { display:flex; flex-direction:column; gap:5px; margin-top:6px; max-height:160px; overflow-y:auto; }
+.rs-invite-result-row { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:10px; background:rgba(255,255,255,.35); cursor:pointer; transition:background .15s; }
+.rs-invite-result-row:hover { background:color-mix(in srgb, var(--blue) 18%, transparent); }
+.rs-invite-result-pfp { width:24px; height:24px; border-radius:50%; object-fit:cover; flex-shrink:0; }
+.rs-invite-result-name { font-size:12px; font-weight:600; color:var(--ink); flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rs-invite-empty { font-size:11px; color:var(--ink-soft); font-style:italic; padding:6px 2px; }
+
+/* ── sleep mode (do-not-disturb) toggle, next to search in the header ── */
+#sleep-btn.active { color:var(--blue-deep); background:color-mix(in srgb, var(--blue) 22%, transparent); }
 
 .noti-row { display:flex; flex-direction:column; gap:5px; padding:9px 10px; border-radius:12px; background:rgba(255,255,255,.16); cursor:default; }
 .noti-row.unread { background:color-mix(in srgb, var(--blue) 16%, transparent); border:1px solid color-mix(in srgb, var(--blue) 28%, transparent); }
@@ -532,7 +551,11 @@ body.select-mode-active .bubble { cursor:pointer; }
 #chat-view.hidden, #games-view.hidden { display:none; }
 
 .rail-backdrop { display:none; }
-.rail-backdrop.show { display:block; position:fixed; inset:0; background:rgba(10,20,30,.35); z-index:35; }
+/* Full-screen but transparent: it only exists to catch a tap outside
+   the rail and close it. The rail itself already has its own shadow
+   (see .side-rail below), so the darkening stays sized to that
+   floating "bubble" instead of dimming the whole screen. */
+.rail-backdrop.show { display:block; position:fixed; inset:0; background:transparent; z-index:35; }
 
 .gc-toast { position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(10px); background:rgba(21,36,58,0.90); color:#fff; padding:10px 18px; border-radius:14px; font-size:12.5px; font-weight:600; box-shadow:0 10px 30px rgba(0,0,0,.25); z-index:200; opacity:0; transition:opacity .25s var(--ease), transform .25s var(--ease); pointer-events:none; max-width:86vw; text-align:center; }
 .gc-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
@@ -548,7 +571,7 @@ body.select-mode-active .bubble { cursor:pointer; }
   .side-rail.mobile-open { width:min(78vw,280px); }
   .side-rail.mobile-open .rail-label { opacity:1; transform:none; }
   .side-rail.mobile-open .rail-section.section-expanded .rail-flyout { max-height:280px; opacity:1; overflow-y:auto; padding:4px 15px 14px; }
-  .side-rail.mobile-open .rail-section[data-section="profile"].section-expanded .rail-flyout { max-height:420px; }
+  .side-rail.mobile-open .rail-section[data-section="profile"].section-expanded .rail-flyout { max-height:460px; }
 }
 @media (min-width: 721px) {
   .rail-backdrop { display:none !important; }
