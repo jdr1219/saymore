@@ -387,25 +387,53 @@ function goStraightToChat() {
 }
 
 /* ── sign up vs sign in ──
-   Sign up: pick (or accept a suggested) 4-digit code, tied to your
-   name, so no one else can pose as you. Sign in: prove you already
-   own a name by entering its code — works from any browser/device,
-   and moves your room standing over to this one. */
+   Sign up walks through a short step-by-step wizard — name, code,
+   photo, theme — each with its own screen and a progress bar, rather
+   than dumping every field on the person at once. Sign in stays a
+   plain two-field panel since there's nothing to "set up": you
+   already have an account, you're just proving you own it. */
 let loginMode = 'signup';
+let wizardStep = 1;
+const WIZARD_STEPS = 4;
+
+function showWizardStep(n) {
+  wizardStep = n;
+  [1, 2, 3, 4].forEach(s => $(`wizard-step-${s}`).classList.toggle('hidden', s !== n));
+  $('wizard-progress-fill').style.width = `${(n / WIZARD_STEPS) * 100}%`;
+  document.querySelectorAll('.wizard-dot').forEach(d => {
+    const s = Number(d.dataset.step);
+    d.classList.toggle('active', s === n);
+    d.classList.toggle('done', s < n);
+  });
+  $('wizard-back-btn').classList.toggle('hidden', n === 1);
+  $('join-btn').textContent = n === WIZARD_STEPS ? 'Join Chat' : 'Next';
+  showFieldError('');
+  if (n === 2) {
+    $('wizard-name-echo').textContent = $('name-input').value.trim() || 'you';
+    refreshSuggestedCode();
+    setTimeout(() => $('signup-code-input').focus(), 220);
+  } else if (n === 1) {
+    setTimeout(() => $('name-input').focus(), 220);
+  }
+}
+
 function setLoginMode(mode) {
   loginMode = mode;
   const isSignIn = mode === 'signin';
-  $('setup-avatar-wrap').classList.toggle('hidden', isSignIn);
-  $('signup-code-row').classList.toggle('hidden', isSignIn);
-  $('signin-code-input').classList.toggle('hidden', !isSignIn);
-  $('login-theme-picker').classList.toggle('hidden', isSignIn);
-  $('login-title').textContent = isSignIn ? 'Welcome back' : 'Welcome to Glass Chat';
-  $('login-sub').textContent = isSignIn ? 'Sign in with your name and code' : 'Set up your profile to get started';
-  $('join-btn').textContent = isSignIn ? 'Sign In' : 'Join Chat';
+  $('wizard-progress').classList.toggle('hidden', isSignIn);
+  [1, 2, 3, 4].forEach(s => $(`wizard-step-${s}`).classList.toggle('hidden', isSignIn || s !== wizardStep));
+  $('signin-step').classList.toggle('hidden', !isSignIn);
+  $('wizard-back-btn').classList.toggle('hidden', isSignIn || wizardStep === 1);
+  $('join-btn').textContent = isSignIn ? 'Sign In' : (wizardStep === WIZARD_STEPS ? 'Join Chat' : 'Next');
   $('signin-toggle-btn').textContent = isSignIn ? "New here? Create a profile" : 'Already have an account? Sign in';
   showFieldError('');
+  if (isSignIn) setTimeout(() => $('signin-name-input').focus(), 50);
 }
-$('signin-toggle-btn').addEventListener('click', () => setLoginMode(loginMode === 'signin' ? 'signup' : 'signin'));
+$('signin-toggle-btn').addEventListener('click', () => {
+  if (loginMode === 'signin') { setLoginMode('signup'); showWizardStep(1); }
+  else setLoginMode('signin');
+});
+$('wizard-back-btn').addEventListener('click', () => { if (wizardStep > 1) showWizardStep(wizardStep - 1); });
 
 async function refreshSuggestedCode() {
   const name = $('name-input').value.trim() || 'user';
@@ -422,6 +450,8 @@ $('signup-code-input').addEventListener('input', e => {
 $('signin-code-input').addEventListener('input', e => {
   e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
 });
+$('signin-code-input').addEventListener('keydown', e => { if (e.key === 'Enter') joinChat(); });
+$('signin-name-input').addEventListener('keydown', e => { if (e.key === 'Enter') joinChat(); });
 
 function showWelcomeScreen() {
   $('login-screen').classList.remove('hidden');
@@ -429,6 +459,7 @@ function showWelcomeScreen() {
     $('setup-avatar-preview').src = letterAvatarDataUrl($('name-input').value.trim(), getTheme(currentThemeId));
   }
   refreshSuggestedCode();
+  showWizardStep(1);
   setTimeout(() => $('name-input').focus(), 50);
 }
 
@@ -470,17 +501,19 @@ $('setup-avatar-upload').addEventListener('change', async e => {
   } catch {}
 });
 
+/* join-btn doubles as "Next" through the wizard and the final submit
+   button on its last step; sign-in submits straight away since it's
+   just the two fields. */
 async function joinChat() {
-  const nameInp = $('name-input');
-  const name = nameInp.value.trim();
-  if (!name) {
-    nameInp.classList.remove('shake'); void nameInp.offsetWidth; nameInp.classList.add('shake');
-    showFieldError('Enter a name to continue');
-    setTimeout(()=>nameInp.classList.remove('shake'),450);
-    return;
-  }
-
   if (loginMode === 'signin') {
+    const nameInp = $('signin-name-input');
+    const name = nameInp.value.trim();
+    if (!name) {
+      nameInp.classList.remove('shake'); void nameInp.offsetWidth; nameInp.classList.add('shake');
+      showFieldError('Enter your name to continue');
+      setTimeout(() => nameInp.classList.remove('shake'), 450);
+      return;
+    }
     const code = $('signin-code-input').value.trim();
     if (code.length !== 4) {
       showFieldError('Enter your 4-digit code');
@@ -495,11 +528,46 @@ async function joinChat() {
     return;
   }
 
-  const signupCode = $('signup-code-input').value.trim();
-  if (signupCode.length !== 4) {
-    showFieldError('Pick a 4-digit code');
+  if (wizardStep === 1) {
+    const nameInp = $('name-input');
+    const name = nameInp.value.trim();
+    if (!name) {
+      nameInp.classList.remove('shake'); void nameInp.offsetWidth; nameInp.classList.add('shake');
+      showFieldError('Enter a name to continue');
+      setTimeout(() => nameInp.classList.remove('shake'), 450);
+      return;
+    }
+    showWizardStep(2);
     return;
   }
+
+  if (wizardStep === 2) {
+    const signupCode = $('signup-code-input').value.trim();
+    if (signupCode.length !== 4) {
+      showFieldError('Pick a 4-digit code');
+      return;
+    }
+    $('join-btn').disabled = true;
+    try {
+      const name = $('name-input').value.trim();
+      const res = await fetch(`/api/check-code?name=${encodeURIComponent(name)}&code=${encodeURIComponent(signupCode)}&clientId=${encodeURIComponent(clientId)}`);
+      const data = await res.json();
+      if (!data.available) {
+        showFieldError('That code is taken — try another');
+        $('join-btn').disabled = false;
+        return;
+      }
+    } catch {}
+    $('join-btn').disabled = false;
+    showWizardStep(3);
+    return;
+  }
+
+  if (wizardStep === 3) { showWizardStep(4); return; }
+
+  // step 4 — everything's chosen, actually create the account
+  const name = $('name-input').value.trim();
+  const signupCode = $('signup-code-input').value.trim();
   showFieldError('');
   $('join-btn').disabled = true;
   myName = name;
@@ -750,10 +818,23 @@ function openEmojiPicker(msgId, anchorEl) {
     b.addEventListener('click', () => { socket.emit('react', { msgId, emoji: e, roomId: roomOf(msgId) }); picker.remove(); });
     picker.appendChild(b);
   });
-  anchorEl.style.position = 'relative';
-  anchorEl.appendChild(picker);
-  const close = ev => { if (!picker.contains(ev.target)) { picker.remove(); document.removeEventListener('click', close); } };
+  // Appended to <body> with fixed positioning (not nested inside the
+  // message row) so the scrolling message list's overflow:hidden can't
+  // clip it and no sibling row's stacking context can cover it.
+  document.body.appendChild(picker);
+  const rect = anchorEl.getBoundingClientRect();
+  const pickerRect = picker.getBoundingClientRect();
+  let top = rect.top - pickerRect.height - 6;
+  if (top < 8) top = rect.bottom + 6; // not enough room above — flip below instead
+  let left = rect.left;
+  left = Math.max(8, Math.min(left, window.innerWidth - pickerRect.width - 8));
+  picker.style.top = `${top}px`;
+  picker.style.left = `${left}px`;
+  const reposition = () => picker.remove();
+  const close = ev => { if (!picker.contains(ev.target)) { picker.remove(); document.removeEventListener('click', close); document.removeEventListener('scroll', reposition, true); window.removeEventListener('resize', reposition); } };
   setTimeout(() => document.addEventListener('click', close), 0);
+  document.addEventListener('scroll', reposition, true);
+  window.addEventListener('resize', reposition);
 }
 
 function svgIcon(name) {
@@ -964,7 +1045,6 @@ function showGamesView() {
   inGamesView = true;
   $('chat-view').classList.add('hidden');
   $('games-view').classList.remove('hidden');
-  document.querySelectorAll('.rail-link').forEach(el => el.classList.add('active-page'));
   $('rail-games-icon').innerHTML = CHAT_ICON_SVG;
   $('rail-games-label').textContent = 'Chat';
   $('rail-games-btn').title = 'Back to chat';
@@ -974,7 +1054,6 @@ function showChatView() {
   inGamesView = false;
   $('games-view').classList.add('hidden');
   $('chat-view').classList.remove('hidden');
-  document.querySelectorAll('.rail-link').forEach(el => el.classList.remove('active-page'));
   $('rail-games-icon').innerHTML = GAMES_ICON_SVG;
   $('rail-games-label').textContent = 'Glass Games';
   $('rail-games-btn').title = 'Glass Games';
@@ -1371,7 +1450,9 @@ function notify(user, text) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   try { new Notification(`${user} — Glass Chat`, { body: text.slice(0,120), icon: 'favicon-32.png' }); } catch {}
 }
-$('notif-btn').addEventListener('click', async () => {
+function updateNotifToggleLabel() { $('notif-toggle-label').textContent = `Notifications: ${notifOn ? 'On' : 'Off'}`; }
+function updateSoundToggleLabel() { $('sound-toggle-label').textContent = `Sound: ${soundOn ? 'On' : 'Off'}`; }
+$('notif-toggle-btn').addEventListener('click', async () => {
   if (!('Notification' in window)) return;
   if (Notification.permission === 'default') {
     const perm = await Notification.requestPermission();
@@ -1380,17 +1461,17 @@ $('notif-btn').addEventListener('click', async () => {
     notifOn = !notifOn;
   }
   localStorage.setItem('gc_notif', notifOn ? 'on' : 'off');
-  $('notif-btn').classList.toggle('active', notifOn);
+  updateNotifToggleLabel();
 });
-if (notifOn) $('notif-btn').classList.add('active');
+updateNotifToggleLabel();
 
-$('sound-btn').addEventListener('click', () => {
+$('sound-toggle-btn').addEventListener('click', () => {
   soundOn = !soundOn;
   localStorage.setItem('gc_sound', soundOn ? 'on' : 'off');
-  $('sound-btn').classList.toggle('active', soundOn);
+  updateSoundToggleLabel();
   if (soundOn) chime();
 });
-if (soundOn) $('sound-btn').classList.add('active');
+updateSoundToggleLabel();
 
 /* ── load more (pagination) ── */
 let oldestTs = null, hasMoreHistory = false;
