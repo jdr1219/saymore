@@ -49,10 +49,21 @@ function timeAgoShort(ts) {
   return `${Math.floor(s/86400)}d`;
 }
 
+/* General always shows the same outline chat-bubble SVG used elsewhere
+   in the sidebar (matching CHAT_ICON_SVG, defined in app.js) instead of
+   an emoji, since it's the app's home room rather than a custom one. */
+function setRoomIconEl(el, room) {
+  if (room && room.id === 'general' && typeof CHAT_ICON_SVG === 'string') {
+    el.innerHTML = CHAT_ICON_SVG;
+  } else {
+    el.textContent = (room && room.icon) || '💬';
+  }
+}
+
 function updateCurrentRoomLabel() {
   const iconEl = $('current-room-icon'), nameEl = $('current-room-name'), labelEl = $('current-room-label');
   if (!labelEl) return; // no chat header currently mounted (shouldn't happen now that games is a view, not a page)
-  iconEl.textContent = currentRoomInfo.icon || '💬';
+  setRoomIconEl(iconEl, currentRoomInfo);
   nameEl.textContent = currentRoomInfo.name || 'General';
   labelEl.title = currentRoomInfo.isPrivileged ? `${currentRoomInfo.name} — room settings` : currentRoomInfo.name;
   labelEl.classList.toggle('is-privileged', !!currentRoomInfo.isPrivileged);
@@ -75,7 +86,7 @@ function renderRoomList() {
 
     const icon = document.createElement('span');
     icon.className = 'room-row-icon';
-    icon.textContent = room.icon || '💬';
+    setRoomIconEl(icon, room);
     row.appendChild(icon);
 
     const name = document.createElement('span');
@@ -232,6 +243,14 @@ function openRoomSettings(anchorEl) {
         img.src = pfpSrc(p.name, p.avatar);
         const name = document.createElement('span');
         name.className = 'rs-invite-result-name'; name.textContent = p.name;
+        if (p.profileId) {
+          name.classList.add('rs-invite-result-name-link');
+          name.title = `View ${p.name}'s profile`;
+          name.addEventListener('click', e => {
+            e.stopPropagation();
+            if (typeof openProfilePage === 'function') openProfilePage(p.profileId);
+          });
+        }
         row.appendChild(img); row.appendChild(name);
         row.addEventListener('click', () => { inviteInput.value = p.name; inviteResults.innerHTML = ''; inviteInput.focus(); });
         inviteResults.appendChild(row);

@@ -2,6 +2,7 @@ const express = require("express");
 const http    = require("http");
 const path    = require("path");
 const fs      = require("fs");
+const crypto  = require("crypto");
 const { Server } = require("socket.io");
 
 const log = {
@@ -84,7 +85,14 @@ app.get("/api/people/search", (req, res) => {
     .filter(p => !q || p.name.toLowerCase().includes(q))
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
     .slice(0, 20)
-    .map(p => ({ name: p.name, avatar: p.avatar || null }));
+    .map(p => {
+      let profileId = null;
+      if (p.code) {
+        const identity = identities[identityKey(p.name, p.code)];
+        if (identity) profileId = ensureProfileId(identity);
+      }
+      return { name: p.name, avatar: p.avatar || null, profileId };
+    });
   res.json(results);
 });
 
@@ -186,6 +194,31 @@ function generateCode(name) {
   }
   return String(Math.floor(1000 + Math.random() * 9000)); // extremely unlikely fallback
 }
+/* ── Public profile pages ──
+   Each identity (name#code) gets a stable, opaque profileId the moment
+   it's touched, so search results and "click a name" links have a
+   safe, non-secret way to reference an account — never the code
+   itself, since that's effectively their sign-in credential. */
+function ensureProfileId(identity) {
+  if (!identity.profileId) identity.profileId = crypto.randomBytes(9).toString("base64url");
+  return identity.profileId;
+}
+function findIdentityByProfileId(pid) {
+  if (!pid) return null;
+  return Object.values(identities).find(i => i.profileId === pid) || null;
+}
+function publicProfileOf(identity, viewerProfileId) {
+  return {
+    profileId: identity.profileId,
+    name: identity.name,
+    avatar: identity.avatar || null,
+    bio: identity.bio || "",
+    theme: identity.theme || null,
+    followerCount: (identity.followers || []).length,
+    isFollowing: !!viewerProfileId && (identity.followers || []).includes(viewerProfileId),
+  };
+}
+
 /* Moves every room reference (admin/co-admin/member/pending/ban) from
    one clientId to another — used when someone signs in on a new
    device so their standing in rooms follows their account. */
@@ -578,11 +611,12 @@ io.on("connection", socket => {
         }
       }
       saveIdentitiesDebounced();
+      ensureProfileId(identity);
     }
 
     if (cid) evictStaleSocket(cid, socket.id); // drop any earlier session from this same browser
     const finalAvatar = validAvatar(avatar) || identity?.avatar || null;
-    users[socket.id] = { name: username, clientId: cid, avatar: finalAvatar, roomId: "general", code: finalCode || null, unread: {} };
+    users[socket.id] = { name: username, clientId: cid, avatar: finalAvatar, roomId: "general", code: finalCode || null, unread: {}, profileId: identity?.profileId || null };
     socket.join("general");
     log.info("join", { username });
 
@@ -674,14 +708,70 @@ io.on("connection", socket => {
     if ("avatar" in data) newAvatar = data.avatar === null ? null : validAvatar(data.avatar);
 
     const oldName = u.name;
+    // keep the name#code identity (and its profileId/bio/followers) in
+    // sync with the new name — otherwise sign-in and profile pages for
+    // this account would silently break after a rename
+    if (u.code && oldName.toLowerCase() !== newName.toLowerCase()) {
+      const oldKey = identityKey(oldName, u.code);
+      const newKey = identityKey(newName, u.code);
+      const identity = identities[oldKey];
+      if (identity) {
+        delete identities[oldKey];
+        identity.name = newName;
+        identities[newKey] = identity;
+        saveIdentitiesDebounced();
+      }
+    }
     u.name = newName; u.avatar = newAvatar;
     socket.emit("profile-updated", { name: newName, avatar: newAvatar });
     if (oldName !== newName) io.emit("system", `${oldName} is now known as ${newName}`);
 
     // persist against this visitor's IP too, so it sticks on their next visit
     const ip = getSocketIp(socket.handshake);
-    profiles[ip] = { name: newName, avatar: newAvatar, updatedAt: Date.now() };
+    const existingProfile = profiles[ip] || {};
+    profiles[ip] = { ...existingProfile, name: newName, avatar: newAvatar, updatedAt: Date.now() };
     saveProfilesDebounced();
+  });
+
+  /* ── Public profile pages ── */
+  socket.on("get-profile", ({ profileId } = {}) => {
+    const u = users[socket.id];
+    const viewerPid = u?.profileId || null;
+    const identity = profileId ? findIdentityByProfileId(profileId) : (u?.code ? identities[identityKey(u.name, u.code)] : null);
+    if (!identity) return socket.emit("error-msg", "That profile couldn't be found");
+    const isSelf = !!viewerPid && identity.profileId === viewerPid;
+    socket.emit("profile-data", { ...publicProfileOf(identity, viewerPid), isSelf });
+  });
+
+  socket.on("update-my-bio-theme", ({ bio, theme } = {}) => {
+    const u = users[socket.id]; if (!u || !u.code) return;
+    const identity = identities[identityKey(u.name, u.code)];
+    if (!identity) return socket.emit("error-msg", "Set up an account (with a code) first");
+    if (typeof bio === "string") identity.bio = sanitize(bio, 200);
+    if (typeof theme === "string") identity.theme = sanitize(theme, 24);
+    identity.updatedAt = Date.now();
+    saveIdentitiesDebounced();
+    socket.emit("profile-data", { ...publicProfileOf(identity, identity.profileId), isSelf: true });
+  });
+
+  socket.on("follow-profile", ({ profileId } = {}) => {
+    const u = users[socket.id]; if (!u || !u.profileId) return socket.emit("error-msg", "Set up an account (with a code) first");
+    if (profileId === u.profileId) return; // can't follow yourself
+    const target = findIdentityByProfileId(profileId);
+    if (!target) return socket.emit("error-msg", "That profile couldn't be found");
+    target.followers = target.followers || [];
+    if (!target.followers.includes(u.profileId)) target.followers.push(u.profileId);
+    saveIdentitiesDebounced();
+    socket.emit("profile-data", { ...publicProfileOf(target, u.profileId), isSelf: false });
+  });
+
+  socket.on("unfollow-profile", ({ profileId } = {}) => {
+    const u = users[socket.id]; if (!u || !u.profileId) return;
+    const target = findIdentityByProfileId(profileId);
+    if (!target) return socket.emit("error-msg", "That profile couldn't be found");
+    target.followers = (target.followers || []).filter(pid => pid !== u.profileId);
+    saveIdentitiesDebounced();
+    socket.emit("profile-data", { ...publicProfileOf(target, u.profileId), isSelf: false });
   });
 
   /* ── Rooms ── */

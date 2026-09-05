@@ -676,6 +676,9 @@ $('profile-code-save-btn').addEventListener('click', () => {
 socket.on('code-changed', ({ code }) => {
   setMyCode(code);
   showToast('Your code is now ' + code);
+  if (profilePageIsSelf && !$('profile-page-screen').classList.contains('hidden')) {
+    $('profile-page-code-input').value = code;
+  }
 });
 $('delete-account-btn').addEventListener('click', () => {
   if (!confirm('Delete your Glass Chat account? This removes your profile, code, and room memberships everywhere. Messages you\'ve already sent will stay. This cannot be undone.')) return;
@@ -720,6 +723,11 @@ $('profile-menu-save-btn').addEventListener('click', async () => {
 socket.on('profile-updated', ({ name, avatar }) => {
   myName = name; myAvatar = avatar;
   updateHeaderProfile();
+  if (profilePageIsSelf && !$('profile-page-screen').classList.contains('hidden')) {
+    $('profile-page-name-text').textContent = name;
+    $('profile-page-name-input').value = name;
+    if (avatar) $('profile-page-avatar').src = avatar;
+  }
 });
 
 /* ── sign out ──
@@ -1030,6 +1038,111 @@ function closeRecentlyDeleted() {
 }
 $('recently-deleted-btn').addEventListener('click', openRecentlyDeleted);
 $('rd-back-btn').addEventListener('click', closeRecentlyDeleted);
+
+/* ════════════════════════════════════════════════
+   PUBLIC PROFILE PAGE — your own (editable) or
+   someone else's (read-only, with a follow button)
+════════════════════════════════════════════════ */
+let profilePageIsSelf = true;
+let profilePageThemeGridBuilt = false;
+
+function openProfilePage(profileId) {
+  $('more-menu').classList.remove('open');
+  $('profile-page-error').textContent = '';
+  $('profile-page-name-error').textContent = '';
+  socket.emit('get-profile', { profileId: profileId || null });
+  $('profile-page-screen').classList.remove('hidden');
+}
+function closeProfilePage() { $('profile-page-screen').classList.add('hidden'); }
+$('profile-page-back-btn').addEventListener('click', closeProfilePage);
+
+socket.on('profile-data', data => {
+  profilePageIsSelf = !!data.isSelf;
+  const theme = getTheme(data.theme) || getTheme(currentThemeId);
+  $('profile-page-avatar').src = data.avatar || (typeof letterAvatarDataUrl === 'function' ? letterAvatarDataUrl(data.name, theme) : 'favicon-32.png');
+  $('profile-page-avatar-btn').classList.toggle('hidden', !profilePageIsSelf);
+
+  $('profile-page-name-display').classList.toggle('hidden', profilePageIsSelf);
+  $('profile-page-name-edit').classList.toggle('hidden', !profilePageIsSelf);
+  $('profile-page-name-text').textContent = data.name;
+  if (profilePageIsSelf) {
+    $('profile-page-name-input').value = data.name;
+    $('profile-page-code-input').value = myCode || '';
+  }
+
+  $('profile-page-follow-btn').classList.toggle('hidden', profilePageIsSelf);
+  if (!profilePageIsSelf) {
+    const btn = $('profile-page-follow-btn');
+    btn.dataset.profileId = data.profileId;
+    btn.textContent = data.isFollowing ? 'Following' : 'Follow';
+    btn.classList.toggle('following', !!data.isFollowing);
+  }
+  const fc = data.followerCount || 0;
+  $('profile-page-follower-count').textContent = `${fc} follower${fc === 1 ? '' : 's'}`;
+
+  $('profile-page-bio-text').classList.toggle('hidden', profilePageIsSelf);
+  $('profile-page-bio-input').classList.toggle('hidden', !profilePageIsSelf);
+  $('profile-page-bio-text').textContent = data.bio || 'No bio yet';
+  if (profilePageIsSelf) $('profile-page-bio-input').value = data.bio || '';
+
+  $('profile-page-theme-label').classList.toggle('hidden', !profilePageIsSelf);
+  $('profile-page-theme-grid').classList.toggle('hidden', !profilePageIsSelf);
+  $('profile-page-save-btn').classList.toggle('hidden', !profilePageIsSelf);
+  if (profilePageIsSelf) renderProfilePageThemeGrid();
+});
+
+function renderProfilePageThemeGrid() {
+  if (profilePageThemeGridBuilt) return;
+  profilePageThemeGridBuilt = true;
+  renderThemeGrid($('profile-page-theme-grid'));
+  $('profile-page-theme-grid').addEventListener('click', e => {
+    const swatch = e.target.closest('.theme-mini-swatch');
+    if (swatch && swatch.dataset.themeId) socket.emit('update-my-bio-theme', { theme: swatch.dataset.themeId });
+  });
+}
+
+$('profile-page-save-btn').addEventListener('click', () => {
+  socket.emit('update-my-bio-theme', { bio: $('profile-page-bio-input').value.trim() });
+  showToast('Bio saved');
+});
+
+$('profile-page-name-save-btn').addEventListener('click', () => {
+  const name = $('profile-page-name-input').value.trim();
+  if (!name) { $('profile-page-name-error').textContent = 'Enter a name'; return; }
+  $('profile-page-name-error').textContent = '';
+  socket.emit('update-profile', { name });
+});
+$('profile-page-code-save-btn').addEventListener('click', () => {
+  const code = $('profile-page-code-input').value.trim();
+  if (code.length !== 4) { $('profile-page-name-error').textContent = 'Code must be 4 digits'; return; }
+  $('profile-page-name-error').textContent = '';
+  socket.emit('change-code', { newCode: code });
+});
+$('profile-page-code-input').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4); });
+
+$('profile-page-follow-btn').addEventListener('click', () => {
+  const btn = $('profile-page-follow-btn');
+  const pid = btn.dataset.profileId;
+  const isFollowing = btn.classList.contains('following');
+  socket.emit(isFollowing ? 'unfollow-profile' : 'follow-profile', { profileId: pid });
+});
+
+$('profile-page-avatar-btn').addEventListener('click', () => $('profile-page-avatar-upload').click());
+$('profile-page-avatar-upload').addEventListener('change', async e => {
+  const file = e.target.files[0]; if (!file) return;
+  try {
+    const dataUrl = await fileToResizedDataUrl(file, 200, 0.85);
+    $('profile-page-avatar').src = dataUrl;
+    socket.emit('update-profile', { avatar: dataUrl });
+  } catch { showToast('Could not read that image'); }
+});
+
+// clicking your own pfp in the sidebar opens your profile page (the
+// rest of that row still opens the quick-settings flyout as before)
+$('rail-avatar').addEventListener('click', e => {
+  e.stopPropagation();
+  openProfilePage(null);
+});
 
 /* ════════════════════════════════════════════════
    CHAT / GAMES view toggle — Glass Games lives inside this same
