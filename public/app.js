@@ -398,6 +398,9 @@ const WIZARD_STEPS = 4;
 
 function showWizardStep(n) {
   wizardStep = n;
+  $('welcome-intro').classList.add('hidden');
+  $('wizard-chrome').classList.remove('hidden');
+  $('wizard-progress').classList.remove('hidden');
   [1, 2, 3, 4].forEach(s => $(`wizard-step-${s}`).classList.toggle('hidden', s !== n));
   $('wizard-progress-fill').style.width = `${(n / WIZARD_STEPS) * 100}%`;
   document.querySelectorAll('.wizard-dot').forEach(d => {
@@ -420,6 +423,8 @@ function showWizardStep(n) {
 function setLoginMode(mode) {
   loginMode = mode;
   const isSignIn = mode === 'signin';
+  $('welcome-intro').classList.add('hidden');
+  $('wizard-chrome').classList.remove('hidden');
   $('wizard-progress').classList.toggle('hidden', isSignIn);
   [1, 2, 3, 4].forEach(s => $(`wizard-step-${s}`).classList.toggle('hidden', isSignIn || s !== wizardStep));
   $('signin-step').classList.toggle('hidden', !isSignIn);
@@ -429,6 +434,8 @@ function setLoginMode(mode) {
   showFieldError('');
   if (isSignIn) setTimeout(() => $('signin-name-input').focus(), 50);
 }
+$('welcome-start-btn').addEventListener('click', () => { loginMode = 'signup'; showWizardStep(1); });
+$('welcome-signin-toggle-btn').addEventListener('click', () => setLoginMode('signin'));
 $('signin-toggle-btn').addEventListener('click', () => {
   if (loginMode === 'signin') { setLoginMode('signup'); showWizardStep(1); }
   else setLoginMode('signin');
@@ -455,12 +462,15 @@ $('signin-name-input').addEventListener('keydown', e => { if (e.key === 'Enter')
 
 function showWelcomeScreen() {
   $('login-screen').classList.remove('hidden');
+  $('welcome-intro').classList.remove('hidden');
+  $('wizard-chrome').classList.add('hidden');
+  $('wizard-progress').classList.add('hidden');
+  [1, 2, 3, 4].forEach(s => $(`wizard-step-${s}`).classList.add('hidden'));
+  $('signin-step').classList.add('hidden');
   if (!pendingSetupAvatar) {
     $('setup-avatar-preview').src = letterAvatarDataUrl($('name-input').value.trim(), getTheme(currentThemeId));
   }
   refreshSuggestedCode();
-  showWizardStep(1);
-  setTimeout(() => $('name-input').focus(), 50);
 }
 
 async function initProfile() {
@@ -955,6 +965,29 @@ document.addEventListener('click', e => {
   if (selectMode) return;
   if (activeActionsGroup && !activeActionsGroup.contains(e.target)) closeActiveActions();
 });
+
+/* ── mobile: swipe the sidebar open/closed ──
+   Swipe right starting near the screen's left edge opens it; swipe
+   left anywhere closes it while it's open. Vertical or short touches
+   are ignored so normal scrolling and tapping are unaffected. */
+let swipeStartX = null, swipeStartY = null, swipeStartedAtEdge = false;
+document.addEventListener('touchstart', e => {
+  if (window.innerWidth > 720 || !e.touches.length) return;
+  swipeStartX = e.touches[0].clientX;
+  swipeStartY = e.touches[0].clientY;
+  swipeStartedAtEdge = swipeStartX <= 28;
+}, { passive: true });
+document.addEventListener('touchend', e => {
+  if (window.innerWidth > 720 || swipeStartX === null || !e.changedTouches.length) return;
+  const dx = e.changedTouches[0].clientX - swipeStartX;
+  const dy = e.changedTouches[0].clientY - swipeStartY;
+  const startedAtEdge = swipeStartedAtEdge;
+  swipeStartX = null;
+  if (Math.abs(dy) > 60 || Math.abs(dx) < 50) return; // too vertical or too short to be a deliberate swipe
+  const rail = $('side-rail');
+  if (dx > 0 && startedAtEdge && !rail.classList.contains('mobile-open')) openMobileRail();
+  else if (dx < 0 && rail.classList.contains('mobile-open')) closeMobileRail();
+}, { passive: true });
 
 /* ════════════════════════════════════════════════
    SELECT MODE — bulk delete

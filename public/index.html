@@ -35,8 +35,19 @@
 <div id="login-screen" class="screen hidden">
   <div class="glass login-card" id="login-card">
 
+    <!-- welcome intro — shown once, before the wizard starts -->
+    <div class="wizard-step" id="welcome-intro">
+      <div class="welcome-logo-wrap">
+        <img src="apple-touch-icon.png" alt="Say More" class="welcome-logo-img"/>
+      </div>
+      <h1 class="login-title welcome-title">Welcome to Say More</h1>
+      <p class="login-sub welcome-sub">Real-time chat and games with the people you actually talk to. Let's get your profile set up.</p>
+      <button class="join-btn" id="welcome-start-btn">Get Started</button>
+      <button class="signin-toggle-btn" id="welcome-signin-toggle-btn" type="button">Already have an account? Sign in</button>
+    </div>
+
     <!-- progress bar — signup wizard only -->
-    <div class="wizard-progress" id="wizard-progress">
+    <div class="wizard-progress hidden" id="wizard-progress">
       <div class="wizard-progress-track"><div class="wizard-progress-fill" id="wizard-progress-fill"></div></div>
       <div class="wizard-progress-dots" id="wizard-progress-dots">
         <span class="wizard-dot active" data-step="1">1</span>
@@ -47,7 +58,7 @@
     </div>
 
     <!-- step 1: name -->
-    <div class="wizard-step" id="wizard-step-1" data-step="1">
+    <div class="wizard-step hidden" id="wizard-step-1" data-step="1">
       <h1 class="login-title">What should we call you?</h1>
       <p class="login-sub">This is the name everyone else will see</p>
       <input class="name-input" id="name-input" type="text" placeholder="Your name..." maxlength="20" autocomplete="off" spellcheck="false"/>
@@ -97,13 +108,15 @@
       <input class="code-input code-input-standalone" id="signin-code-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="Your 4-digit code"/>
     </div>
 
-    <div class="field-error" id="field-error"></div>
+    <div id="wizard-chrome">
+      <div class="field-error" id="field-error"></div>
 
-    <div class="wizard-nav">
-      <button class="wizard-back-btn hidden" id="wizard-back-btn" type="button">Back</button>
-      <button class="join-btn" id="join-btn">Next</button>
+      <div class="wizard-nav">
+        <button class="wizard-back-btn hidden" id="wizard-back-btn" type="button">Back</button>
+        <button class="join-btn" id="join-btn">Next</button>
+      </div>
+      <button class="signin-toggle-btn" id="signin-toggle-btn" type="button">Already have an account? Sign in</button>
     </div>
-    <button class="signin-toggle-btn" id="signin-toggle-btn" type="button">Already have an account? Sign in</button>
   </div>
 </div>
 

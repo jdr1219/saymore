@@ -93,6 +93,13 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; over
 .code-row-label { display:block; font-size:11px; font-weight:700; color:var(--ink-soft); margin-bottom:6px; text-align:center; }
 .code-row-hint { display:block; font-weight:500; font-size:10px; color:var(--ink-soft); opacity:.8; margin-top:1px; }
 
+/* ── welcome intro (shown once, before the setup wizard) ── */
+.welcome-logo-wrap { display:flex; justify-content:center; margin-bottom:20px; animation: fadeUp .5s var(--ease) .04s both; }
+.welcome-logo-img { width:76px; height:76px; border-radius:22px; box-shadow:0 10px 28px rgba(15,40,60,.22); }
+.welcome-title { text-align:center; font-size:27px; }
+.welcome-sub { text-align:center; max-width:340px; margin-left:auto; margin-right:auto; }
+#welcome-intro .join-btn { margin-bottom:10px; }
+
 /* ── signup wizard ── */
 .wizard-progress { margin-bottom:28px; animation: fadeUp .5s var(--ease) .04s both; }
 .wizard-progress-track { height:5px; border-radius:4px; background:rgba(21,36,58,.10); overflow:hidden; margin-bottom:14px; }
