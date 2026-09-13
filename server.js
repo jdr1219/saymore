@@ -536,7 +536,7 @@ async function fetchPreview(url) {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 4000);
-    const res = await fetch(url, { signal: ctrl.signal, headers: { "User-Agent": "Mozilla/5.0 GlassChatBot" } });
+    const res = await fetch(url, { signal: ctrl.signal, headers: { "User-Agent": "Mozilla/5.0 SayMoreBot" } });
     clearTimeout(t);
     const html = await res.text();
     const pick = re => (html.match(re) || [])[1];

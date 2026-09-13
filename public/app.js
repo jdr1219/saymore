@@ -681,7 +681,7 @@ socket.on('code-changed', ({ code }) => {
   }
 });
 $('delete-account-btn').addEventListener('click', () => {
-  if (!confirm('Delete your Glass Chat account? This removes your profile, code, and room memberships everywhere. Messages you\'ve already sent will stay. This cannot be undone.')) return;
+  if (!confirm('Delete your Say More account? This removes your profile, code, and room memberships everywhere. Messages you\'ve already sent will stay. This cannot be undone.')) return;
   socket.emit('delete-account');
 });
 socket.on('account-deleted', () => {
@@ -736,7 +736,7 @@ socket.on('profile-updated', ({ name, avatar }) => {
    next visit or a page refresh), clears what's cached locally, and
    drops back to the welcome/setup screen. */
 async function signOut() {
-  if (!confirm('Sign out of Glass Chat?')) return;
+  if (!confirm('Sign out of Say More?')) return;
   try { await fetch('/api/profile', { method: 'DELETE' }); } catch {}
 
   localStorage.removeItem('gc_name');
@@ -1168,8 +1168,8 @@ function showChatView() {
   $('games-view').classList.add('hidden');
   $('chat-view').classList.remove('hidden');
   $('rail-games-icon').innerHTML = GAMES_ICON_SVG;
-  $('rail-games-label').textContent = 'Glass Games';
-  $('rail-games-btn').title = 'Glass Games';
+  $('rail-games-label').textContent = 'Play More';
+  $('rail-games-btn').title = 'Play More';
 }
 /* No back arrow — the sidebar is the only nav. Clicking Glass Games
    again while already there just takes you back to chat. */
@@ -1549,7 +1549,7 @@ function clearUnread() {
   updateTitleBadge();
 }
 function updateTitleBadge() {
-  document.title = unreadCount > 0 ? `(${unreadCount}) Glass Chat` : 'Glass Chat';
+  document.title = unreadCount > 0 ? `(${unreadCount}) Say More` : 'Say More';
 }
 $('messages').addEventListener('scroll', () => { if (isNearBottom()) clearUnread(); });
 $('scroll-bottom-btn').addEventListener('click', () => {
@@ -1561,7 +1561,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) clea
 /* ── notifications ── */
 function notify(user, text) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
-  try { new Notification(`${user} — Glass Chat`, { body: text.slice(0,120), icon: 'favicon-32.png' }); } catch {}
+  try { new Notification(`${user} — Say More`, { body: text.slice(0,120), icon: 'favicon-32.png' }); } catch {}
 }
 function updateNotifToggleLabel() { $('notif-toggle-label').textContent = `Notifications: ${notifOn ? 'On' : 'Off'}`; }
 function updateSoundToggleLabel() { $('sound-toggle-label').textContent = `Sound: ${soundOn ? 'On' : 'Off'}`; }
