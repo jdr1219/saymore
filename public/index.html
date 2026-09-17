@@ -174,6 +174,7 @@
         </button>
       </div>
 
+      <div class="rail-quick-rooms" id="rail-quick-rooms"></div>
       <div class="rail-spacer"></div>
 
       <div class="rail-section" data-section="profile">
@@ -323,6 +324,84 @@
         <div id="games-results"></div>
       </div>
     </div>
+
+    <!-- PROFILE — its own view inside the same card/sidebar as chat and
+         games (own, editable; or someone else's, read-only + follow + DM) -->
+    <div id="profile-view" class="hidden">
+      <header class="chat-header">
+        <div class="header-left">
+          <button class="icon-btn rail-toggle-btn" id="profile-rail-toggle-btn" title="Menu" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+          </button>
+          <button class="icon-btn" id="profile-page-back-btn" title="Back to chat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+        </div>
+        <span class="header-title">Profile</span>
+        <div class="header-right"></div>
+      </header>
+
+      <div class="profile-page-body" id="profile-page-body">
+
+        <div class="profile-page-avatar-wrap" id="profile-page-avatar-wrap">
+          <img id="profile-page-avatar" src="favicon-32.png" alt=""/>
+          <button class="avatar-edit-overlay hidden" id="profile-page-avatar-btn" title="Change photo" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+          </button>
+          <input type="file" id="profile-page-avatar-upload" accept="image/*" style="display:none"/>
+        </div>
+
+        <!-- read-only header (shown for everyone; name text swaps to an editable field for self) -->
+        <div class="profile-page-name-row" id="profile-page-name-display">
+          <span id="profile-page-name-text">Name</span>
+        </div>
+
+        <!-- self-only: editable name + code -->
+        <div class="profile-page-edit-row hidden" id="profile-page-name-edit">
+          <input class="profile-menu-name-input" id="profile-page-name-input" maxlength="24" placeholder="Your name"/>
+          <div class="profile-code-row">
+            <input class="profile-code-input" id="profile-page-code-input" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000"/>
+            <button class="profile-code-save-btn" id="profile-page-code-save-btn" title="Save code" type="button">✓</button>
+          </div>
+          <button class="profile-menu-save-btn" id="profile-page-name-save-btn" type="button">Save name</button>
+          <div class="profile-menu-error" id="profile-page-name-error"></div>
+        </div>
+
+        <div class="profile-page-actions-row" id="profile-page-actions-row">
+          <button class="follow-btn hidden" id="profile-page-follow-btn" type="button">Follow</button>
+          <button class="message-btn hidden" id="profile-page-message-btn" type="button">Message</button>
+        </div>
+        <div class="profile-page-follower-count" id="profile-page-follower-count"></div>
+
+        <div class="profile-page-section-label">Bio</div>
+        <p class="profile-page-bio-text" id="profile-page-bio-text"></p>
+        <textarea class="profile-page-bio-input hidden" id="profile-page-bio-input" maxlength="200" placeholder="Write a short bio..." rows="3"></textarea>
+
+        <div class="profile-page-section-label hidden" id="profile-page-theme-label">Theme</div>
+        <div class="theme-mini-grid hidden" id="profile-page-theme-grid"></div>
+
+        <button class="profile-menu-save-btn hidden" id="profile-page-save-btn" type="button">Save changes</button>
+        <div class="profile-menu-error" id="profile-page-error"></div>
+
+        <!-- one-on-one DM panel — only ever shown once the thread is
+             accepted by both sides ("get verification from the person") -->
+        <div class="dm-panel hidden" id="dm-panel">
+          <div class="dm-panel-header">
+            <span id="dm-panel-title">Messages</span>
+            <button class="dm-panel-close" id="dm-panel-close" title="Close" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="dm-messages" id="dm-messages"></div>
+          <div class="dm-input-row">
+            <input type="text" id="dm-input" placeholder="Message..." maxlength="2000" autocomplete="off"/>
+            <button class="dm-send-btn" id="dm-send-btn" type="button" title="Send">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
     </div>
   </div>
 </div>
@@ -338,59 +417,6 @@
       </div>
     </header>
     <div class="rd-list" id="recently-deleted-list"></div>
-  </div>
-</div>
-
-<!-- PUBLIC PROFILE PAGE — own (editable) or someone else's (read-only + follow) -->
-<div id="profile-page-screen" class="screen hidden">
-  <div class="glass chat-card rd-card">
-    <header class="chat-header">
-      <div class="header-left">
-        <button class="icon-btn" id="profile-page-back-btn" title="Back">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-        </button>
-        <span class="header-title">Profile</span>
-      </div>
-    </header>
-    <div class="profile-page-body" id="profile-page-body">
-
-      <div class="profile-page-avatar-wrap" id="profile-page-avatar-wrap">
-        <img id="profile-page-avatar" src="favicon-32.png" alt=""/>
-        <button class="avatar-edit-overlay hidden" id="profile-page-avatar-btn" title="Change photo" type="button">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-        </button>
-        <input type="file" id="profile-page-avatar-upload" accept="image/*" style="display:none"/>
-      </div>
-
-      <!-- read-only header (shown for everyone; name text swaps to an editable field for self) -->
-      <div class="profile-page-name-row" id="profile-page-name-display">
-        <span id="profile-page-name-text">Name</span>
-      </div>
-
-      <!-- self-only: editable name + code -->
-      <div class="profile-page-edit-row hidden" id="profile-page-name-edit">
-        <input class="profile-menu-name-input" id="profile-page-name-input" maxlength="24" placeholder="Your name"/>
-        <div class="profile-code-row">
-          <input class="profile-code-input" id="profile-page-code-input" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000"/>
-          <button class="profile-code-save-btn" id="profile-page-code-save-btn" title="Save code" type="button">✓</button>
-        </div>
-        <button class="profile-menu-save-btn" id="profile-page-name-save-btn" type="button">Save name</button>
-        <div class="profile-menu-error" id="profile-page-name-error"></div>
-      </div>
-
-      <button class="follow-btn hidden" id="profile-page-follow-btn" type="button">Follow</button>
-      <div class="profile-page-follower-count" id="profile-page-follower-count"></div>
-
-      <div class="profile-page-section-label">Bio</div>
-      <p class="profile-page-bio-text" id="profile-page-bio-text"></p>
-      <textarea class="profile-page-bio-input hidden" id="profile-page-bio-input" maxlength="200" placeholder="Write a short bio..." rows="3"></textarea>
-
-      <div class="profile-page-section-label hidden" id="profile-page-theme-label">Theme</div>
-      <div class="theme-mini-grid hidden" id="profile-page-theme-grid"></div>
-
-      <button class="profile-menu-save-btn hidden" id="profile-page-save-btn" type="button">Save changes</button>
-      <div class="profile-menu-error" id="profile-page-error"></div>
-    </div>
   </div>
 </div>
 

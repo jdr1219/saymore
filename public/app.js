@@ -164,6 +164,7 @@ function renderThemeGrid(container) {
 
 let myName = '';
 let myAvatar = null;
+let myProfileId = null;
 let pendingSetupAvatar = null;
 let pendingProfileMenuAvatar; // undefined = "no new upload chosen this time menu was opened"
 let lastGroupEl = null, lastGroupUser = null, lastGroupTime = 0;
@@ -617,6 +618,7 @@ socket.on('join-success', (data = {}) => {
   $('join-btn').disabled = false;
   if (data.code) setMyCode(data.code);
   if (data.name) { myName = data.name; localStorage.setItem('gc_name', myName); }
+  if ('profileId' in data) myProfileId = data.profileId || null;
   if ('avatar' in data) {
     myAvatar = data.avatar || null;
     if (myAvatar) localStorage.setItem('gc_avatar', myAvatar); else localStorage.removeItem('gc_avatar');
@@ -686,7 +688,7 @@ $('profile-code-save-btn').addEventListener('click', () => {
 socket.on('code-changed', ({ code }) => {
   setMyCode(code);
   showToast('Your code is now ' + code);
-  if (profilePageIsSelf && !$('profile-page-screen').classList.contains('hidden')) {
+  if (profilePageIsSelf && !$('profile-view').classList.contains('hidden')) {
     $('profile-page-code-input').value = code;
   }
 });
@@ -733,7 +735,7 @@ $('profile-menu-save-btn').addEventListener('click', async () => {
 socket.on('profile-updated', ({ name, avatar }) => {
   myName = name; myAvatar = avatar;
   updateHeaderProfile();
-  if (profilePageIsSelf && !$('profile-page-screen').classList.contains('hidden')) {
+  if (profilePageIsSelf && !$('profile-view').classList.contains('hidden')) {
     $('profile-page-name-text').textContent = name;
     $('profile-page-name-input').value = name;
     if (avatar) $('profile-page-avatar').src = avatar;
@@ -752,7 +754,7 @@ async function signOut() {
   localStorage.removeItem('gc_name');
   localStorage.removeItem('gc_avatar');
   localStorage.removeItem('gc_code');
-  myName = ''; myAvatar = null; myCode = null;
+  myName = ''; myAvatar = null; myCode = null; myProfileId = null;
   pendingSetupAvatar = null; pendingProfileMenuAvatar = undefined;
   hasJoinedOnce = false;
 
@@ -1078,20 +1080,59 @@ $('rd-back-btn').addEventListener('click', closeRecentlyDeleted);
 ════════════════════════════════════════════════ */
 let profilePageIsSelf = true;
 let profilePageThemeGridBuilt = false;
+let profilePageDm = null; // { key, accepted, pending, isRequester } — null when viewing your own page
 
 function openProfilePage(profileId) {
   $('more-menu').classList.remove('open');
   $('profile-page-error').textContent = '';
   $('profile-page-name-error').textContent = '';
+  closeDmPanel();
   socket.emit('get-profile', { profileId: profileId || null });
-  $('profile-page-screen').classList.remove('hidden');
+  showProfileView();
 }
-function closeProfilePage() { $('profile-page-screen').classList.add('hidden'); }
+function closeProfilePage() { showChatView(); }
 $('profile-page-back-btn').addEventListener('click', closeProfilePage);
+$('profile-rail-toggle-btn').addEventListener('click', () => {
+  $('side-rail').classList.contains('mobile-open') ? closeMobileRail() : openMobileRail();
+});
+
+/* The profile "page" recolors to whoever's page it is — scoped to
+   the shared card only (not the whole app's theme), and cleared the
+   moment you leave it for chat or games. */
+function applyProfileViewTheme(themeId) {
+  const card = document.querySelector('.app-layout .chat-card');
+  if (!card) return;
+  const theme = getTheme(themeId || currentThemeId);
+  Object.entries(THEME_VAR_MAP).forEach(([key, cssVar]) => card.style.setProperty(cssVar, theme[key]));
+}
+function clearProfileViewTheme() {
+  const card = document.querySelector('.app-layout .chat-card');
+  if (!card) return;
+  Object.values(THEME_VAR_MAP).forEach(cssVar => card.style.removeProperty(cssVar));
+}
+
+function updateMessageBtn() {
+  const btn = $('profile-page-message-btn');
+  btn.classList.toggle('hidden', profilePageIsSelf);
+  if (profilePageIsSelf || !profilePageDm) return;
+  btn.classList.remove('requesting');
+  if (profilePageDm.accepted) {
+    btn.textContent = 'Message';
+  } else if (profilePageDm.pending && profilePageDm.isRequester) {
+    btn.textContent = 'Request sent';
+    btn.classList.add('requesting');
+  } else if (profilePageDm.pending && !profilePageDm.isRequester) {
+    btn.textContent = 'Accept message request';
+  } else {
+    btn.textContent = 'Message';
+  }
+}
 
 socket.on('profile-data', data => {
   profilePageIsSelf = !!data.isSelf;
+  profilePageDm = data.dm || null;
   const theme = getTheme(data.theme) || getTheme(currentThemeId);
+  applyProfileViewTheme(data.theme);
   $('profile-page-avatar').src = data.avatar || (typeof letterAvatarDataUrl === 'function' ? letterAvatarDataUrl(data.name, theme) : 'favicon-32.png');
   $('profile-page-avatar-btn').classList.toggle('hidden', !profilePageIsSelf);
 
@@ -1110,6 +1151,8 @@ socket.on('profile-data', data => {
     btn.textContent = data.isFollowing ? 'Following' : 'Follow';
     btn.classList.toggle('following', !!data.isFollowing);
   }
+  $('profile-page-message-btn').dataset.profileId = data.profileId || '';
+  updateMessageBtn();
   const fc = data.followerCount || 0;
   $('profile-page-follower-count').textContent = `${fc} follower${fc === 1 ? '' : 's'}`;
 
@@ -1122,7 +1165,103 @@ socket.on('profile-data', data => {
   $('profile-page-theme-grid').classList.toggle('hidden', !profilePageIsSelf);
   $('profile-page-save-btn').classList.toggle('hidden', !profilePageIsSelf);
   if (profilePageIsSelf) renderProfilePageThemeGrid();
+
+  if (profilePageDm && profilePageDm.accepted) openDmPanel(profilePageDm.key, data.name, data.avatar);
+  else closeDmPanel();
 });
+
+/* ── one-on-one DMs (only usable once the other person accepts) ── */
+let activeDmKey = null;
+function openDmPanel(key, otherName, otherAvatar) {
+  activeDmKey = key;
+  $('dm-panel-title').textContent = otherName || 'Messages';
+  $('dm-panel').classList.remove('hidden');
+  $('dm-messages').innerHTML = '<div class="dm-loading">Loading…</div>';
+  socket.emit('dm-open', { threadKey: key });
+}
+function closeDmPanel() {
+  activeDmKey = null;
+  $('dm-panel').classList.add('hidden');
+  $('dm-messages').innerHTML = '';
+}
+function renderDmMessages(messages) {
+  const box = $('dm-messages');
+  box.innerHTML = '';
+  if (!messages.length) {
+    box.innerHTML = '<div class="dm-empty">Say hello 👋</div>';
+    return;
+  }
+  messages.forEach(m => {
+    const row = document.createElement('div');
+    row.className = 'dm-bubble-row ' + (m.from === myProfileId ? 'own' : 'recv');
+    const bubble = document.createElement('div');
+    bubble.className = 'dm-bubble';
+    bubble.textContent = m.text;
+    row.appendChild(bubble);
+    box.appendChild(row);
+  });
+  box.scrollTop = box.scrollHeight;
+}
+socket.on('dm-thread', data => {
+  profilePageDm = data;
+  updateMessageBtn();
+  if (data.accepted) openDmPanel(data.key, $('profile-page-name-text').textContent, $('profile-page-avatar').src);
+});
+socket.on('dm-thread-status', data => {
+  if (profilePageDm && data.key === profilePageDm.key) {
+    profilePageDm.accepted = !!data.accepted;
+    profilePageDm.pending = !data.accepted && !data.declined;
+    updateMessageBtn();
+    if (data.accepted) {
+      openDmPanel(data.key, $('profile-page-name-text').textContent, $('profile-page-avatar').src);
+      showToast("You're connected — say hi!");
+    } else if (data.declined) {
+      closeDmPanel();
+    }
+  }
+});
+socket.on('dm-thread-full', data => {
+  if (data.key !== activeDmKey) return;
+  $('dm-panel-title').textContent = data.otherName || 'Messages';
+  renderDmMessages(data.messages || []);
+});
+socket.on('dm-message', ({ key, message }) => {
+  if (key !== activeDmKey) return;
+  const box = $('dm-messages');
+  const empty = box.querySelector('.dm-empty'); if (empty) empty.remove();
+  const row = document.createElement('div');
+  row.className = 'dm-bubble-row ' + (message.from === myProfileId ? 'own' : 'recv');
+  const bubble = document.createElement('div');
+  bubble.className = 'dm-bubble';
+  bubble.textContent = message.text;
+  row.appendChild(bubble);
+  box.appendChild(row);
+  box.scrollTop = box.scrollHeight;
+});
+
+$('profile-page-message-btn').addEventListener('click', () => {
+  const pid = $('profile-page-message-btn').dataset.profileId;
+  if (!pid) return;
+  if (profilePageDm && profilePageDm.pending && !profilePageDm.isRequester) {
+    socket.emit('dm-respond', { threadKey: profilePageDm.key, approve: true });
+    return;
+  }
+  if (profilePageDm && profilePageDm.accepted) {
+    openDmPanel(profilePageDm.key, $('profile-page-name-text').textContent, $('profile-page-avatar').src);
+    return;
+  }
+  socket.emit('dm-request', { profileId: pid });
+});
+$('dm-panel-close').addEventListener('click', closeDmPanel);
+function sendDmMessage() {
+  const input = $('dm-input');
+  const text = input.value.trim();
+  if (!text || !activeDmKey) return;
+  socket.emit('dm-send', { threadKey: activeDmKey, text });
+  input.value = '';
+}
+$('dm-send-btn').addEventListener('click', sendDmMessage);
+$('dm-input').addEventListener('keydown', e => { if (e.key === 'Enter') sendDmMessage(); });
 
 function renderProfilePageThemeGrid() {
   if (profilePageThemeGridBuilt) return;
@@ -1190,6 +1329,8 @@ const CHAT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor
 function showGamesView() {
   inGamesView = true;
   $('chat-view').classList.add('hidden');
+  $('profile-view').classList.add('hidden');
+  clearProfileViewTheme();
   $('games-view').classList.remove('hidden');
   $('rail-games-icon').innerHTML = CHAT_ICON_SVG;
   $('rail-games-label').textContent = 'Chat';
@@ -1199,10 +1340,21 @@ function showGamesView() {
 function showChatView() {
   inGamesView = false;
   $('games-view').classList.add('hidden');
+  $('profile-view').classList.add('hidden');
+  clearProfileViewTheme();
   $('chat-view').classList.remove('hidden');
   $('rail-games-icon').innerHTML = GAMES_ICON_SVG;
   $('rail-games-label').textContent = 'Play More';
   $('rail-games-btn').title = 'Play More';
+}
+/* PROFILE — a third view alongside chat/games, sharing the same
+   card and sidebar, so quick-room icons and the rail nav stay put
+   no matter which of the three you're looking at. */
+function showProfileView() {
+  inGamesView = false;
+  $('chat-view').classList.add('hidden');
+  $('games-view').classList.add('hidden');
+  $('profile-view').classList.remove('hidden');
 }
 /* No back arrow — the sidebar is the only nav. Clicking Glass Games
    again while already there just takes you back to chat. */

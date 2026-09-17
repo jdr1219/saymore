@@ -308,6 +308,35 @@ function saveNotificationsDebounced() {
   }, 500);
 }
 
+/* ── One-on-one direct messages ──
+   A DM thread only carries messages once the recipient has accepted
+   the sender's request — verification-gated, same shape as the
+   room-invite/join-request flow above. Threads are keyed by both
+   participants' profileIds (order-independent) so there's exactly
+   one thread per pair no matter who reaches out first. */
+const DM_THREADS_FILE = path.join(__dirname, "data", "dm-threads.json");
+function loadDmThreads() {
+  try { return JSON.parse(fs.readFileSync(DM_THREADS_FILE, "utf8")); }
+  catch { return {}; }
+}
+let dmThreadsSaveTimer = null;
+function saveDmThreadsDebounced() {
+  clearTimeout(dmThreadsSaveTimer);
+  dmThreadsSaveTimer = setTimeout(() => {
+    try {
+      fs.mkdirSync(path.dirname(DM_THREADS_FILE), { recursive: true });
+      fs.writeFileSync(DM_THREADS_FILE, JSON.stringify(dmThreads));
+    } catch (e) { log.error("dm-threads-save-failed", { err: e.message }); }
+  }, 500);
+}
+function dmThreadKey(a, b) { return [a, b].sort().join("::"); }
+function otherParticipant(thread, pid) { return thread.participants.find(p => p !== pid); }
+function findSocketEntryByProfileId(pid) {
+  if (!pid) return null;
+  return Object.entries(users).find(([, u]) => u.profileId === pid) || null;
+}
+const MAX_DM_HISTORY = 300;
+
 const MAX_HISTORY = 300;
 const PAGE_SIZE   = 30;
 const MAX_MSG_LEN = 2000;
@@ -321,6 +350,7 @@ const identities = loadIdentities(); // "name#code" -> { name, code, avatar, cli
 const rooms         = loadRooms();          // roomId -> RoomMeta (excludes 'general')
 const roomMessages  = loadRoomMessages();   // roomId -> [msg,...]  (excludes 'general', which uses `history`)
 const notifications = loadNotifications();  // usernameLower -> [notif,...]
+const dmThreads     = loadDmThreads();      // threadKey -> { participants:[pidA,pidB], accepted, requestedBy, messages, lastRead, updatedAt }
 const GENERAL_ROOM = { id: "general", name: "General", icon: "💬" };
 const users      = {};   // socket.id -> { name, clientId, avatar, roomId, unread }
 const rateLimits = {};
@@ -630,7 +660,7 @@ io.on("connection", socket => {
       saveProfilesDebounced();
     }
 
-    socket.emit("join-success", { code: finalCode || null, name: username, avatar: finalAvatar });
+    socket.emit("join-success", { code: finalCode || null, name: username, avatar: finalAvatar, profileId: identity?.profileId || null });
     socket.emit("history", history.slice(-PAGE_SIZE).map(publicMsg));
     socket.emit("history-has-more", history.length > PAGE_SIZE);
     socket.emit("my-rooms", myRoomsList(cid));
@@ -740,7 +770,15 @@ io.on("connection", socket => {
     const identity = profileId ? findIdentityByProfileId(profileId) : (u?.code ? identities[identityKey(u.name, u.code)] : null);
     if (!identity) return socket.emit("error-msg", "That profile couldn't be found");
     const isSelf = !!viewerPid && identity.profileId === viewerPid;
-    socket.emit("profile-data", { ...publicProfileOf(identity, viewerPid), isSelf });
+    let dm = null;
+    if (!isSelf && viewerPid) {
+      const key = dmThreadKey(viewerPid, identity.profileId);
+      const thread = dmThreads[key];
+      dm = thread
+        ? { key, accepted: !!thread.accepted, pending: !thread.accepted, isRequester: thread.requestedBy === viewerPid }
+        : { key, accepted: false, pending: false, isRequester: false };
+    }
+    socket.emit("profile-data", { ...publicProfileOf(identity, viewerPid), isSelf, dm });
   });
 
   socket.on("update-my-bio-theme", ({ bio, theme } = {}) => {
@@ -760,7 +798,14 @@ io.on("connection", socket => {
     const target = findIdentityByProfileId(profileId);
     if (!target) return socket.emit("error-msg", "That profile couldn't be found");
     target.followers = target.followers || [];
-    if (!target.followers.includes(u.profileId)) target.followers.push(u.profileId);
+    if (!target.followers.includes(u.profileId)) {
+      target.followers.push(u.profileId);
+      notifyUser(target.name, {
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        type: "follow", ts: Date.now(), read: false,
+        fromName: u.name, fromProfileId: u.profileId,
+      });
+    }
     saveIdentitiesDebounced();
     socket.emit("profile-data", { ...publicProfileOf(target, u.profileId), isSelf: false });
   });
@@ -772,6 +817,109 @@ io.on("connection", socket => {
     target.followers = (target.followers || []).filter(pid => pid !== u.profileId);
     saveIdentitiesDebounced();
     socket.emit("profile-data", { ...publicProfileOf(target, u.profileId), isSelf: false });
+  });
+
+  /* ── One-on-one direct messages (verification-gated) ──
+     Requesting a thread notifies the other person; nothing can be
+     sent until they accept. If they'd already requested you first,
+     reaching out back accepts it immediately (mutual interest). ── */
+  socket.on("dm-request", ({ profileId } = {}) => {
+    const u = users[socket.id]; if (!u || !u.profileId) return socket.emit("error-msg", "Set up an account (with a code) first");
+    if (profileId === u.profileId) return socket.emit("error-msg", "That's you!");
+    const target = findIdentityByProfileId(profileId);
+    if (!target) return socket.emit("error-msg", "That profile couldn't be found");
+
+    const key = dmThreadKey(u.profileId, profileId);
+    let thread = dmThreads[key];
+
+    if (thread && thread.accepted) {
+      return socket.emit("dm-thread", { key, accepted: true, pending: false, isRequester: false, otherProfileId: profileId });
+    }
+    if (thread && !thread.accepted && thread.requestedBy === u.profileId) {
+      return socket.emit("dm-thread", { key, accepted: false, pending: true, isRequester: true, otherProfileId: profileId });
+    }
+    if (thread && !thread.accepted && thread.requestedBy !== u.profileId) {
+      thread.accepted = true;
+      saveDmThreadsDebounced();
+      const reqEntry = findSocketEntryByProfileId(thread.requestedBy);
+      if (reqEntry) io.to(reqEntry[0]).emit("dm-thread-status", { key, accepted: true });
+      const requesterIdentity = findIdentityByProfileId(thread.requestedBy);
+      if (requesterIdentity) notifyUser(requesterIdentity.name, {
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        type: "dm-accepted", ts: Date.now(), read: false, fromName: u.name, fromProfileId: u.profileId,
+      });
+      return socket.emit("dm-thread", { key, accepted: true, pending: false, isRequester: false, otherProfileId: profileId });
+    }
+
+    thread = { key, participants: [u.profileId, profileId], accepted: false, requestedBy: u.profileId, messages: [], lastRead: {}, updatedAt: Date.now() };
+    dmThreads[key] = thread;
+    saveDmThreadsDebounced();
+    notifyUser(target.name, {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type: "dm-request", ts: Date.now(), read: false,
+      fromName: u.name, fromProfileId: u.profileId, threadKey: key,
+    });
+    socket.emit("dm-thread", { key, accepted: false, pending: true, isRequester: true, otherProfileId: profileId });
+  });
+
+  socket.on("dm-respond", ({ threadKey, approve } = {}) => {
+    const u = users[socket.id]; if (!u || !u.profileId) return;
+    const thread = dmThreads[threadKey]; if (!thread) return;
+    if (!thread.participants.includes(u.profileId) || thread.requestedBy === u.profileId) return; // only the recipient responds
+    const requesterPid = thread.requestedBy;
+    const requesterIdentity = findIdentityByProfileId(requesterPid);
+
+    if (approve) {
+      thread.accepted = true;
+    } else {
+      delete dmThreads[threadKey];
+    }
+    saveDmThreadsDebounced();
+    const reqEntry = findSocketEntryByProfileId(requesterPid);
+    if (reqEntry) io.to(reqEntry[0]).emit("dm-thread-status", { key: threadKey, accepted: !!approve, declined: !approve });
+    if (approve && requesterIdentity) {
+      notifyUser(requesterIdentity.name, {
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        type: "dm-accepted", ts: Date.now(), read: false, fromName: u.name, fromProfileId: u.profileId,
+      });
+    }
+    socket.emit("dm-thread-status", { key: threadKey, accepted: !!approve, declined: !approve });
+  });
+
+  socket.on("dm-open", ({ threadKey } = {}) => {
+    const u = users[socket.id]; if (!u || !u.profileId) return;
+    const thread = dmThreads[threadKey]; if (!thread || !thread.participants.includes(u.profileId)) return;
+    thread.lastRead = thread.lastRead || {};
+    thread.lastRead[u.profileId] = Date.now();
+    saveDmThreadsDebounced();
+    const otherPid = otherParticipant(thread, u.profileId);
+    const otherIdentity = findIdentityByProfileId(otherPid);
+    socket.emit("dm-thread-full", {
+      key: threadKey, accepted: !!thread.accepted,
+      otherProfileId: otherPid, otherName: otherIdentity?.name || "Someone", otherAvatar: otherIdentity?.avatar || null,
+      messages: thread.accepted ? thread.messages.slice(-MAX_DM_HISTORY) : [],
+    });
+  });
+
+  socket.on("dm-send", ({ threadKey, text } = {}) => {
+    const u = users[socket.id]; if (!u || !u.profileId) return;
+    const thread = dmThreads[threadKey]; if (!thread || !thread.accepted || !thread.participants.includes(u.profileId)) return;
+    if (isRateLimited(socket.id)) return socket.emit("error-msg", "Slow down a little");
+    const clean = sanitize(text, MAX_MSG_LEN);
+    if (!clean) return;
+
+    const msg = { id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, from: u.profileId, text: clean, ts: Date.now() };
+    thread.messages.push(msg);
+    if (thread.messages.length > MAX_DM_HISTORY) thread.messages.shift();
+    thread.lastRead = thread.lastRead || {};
+    thread.lastRead[u.profileId] = Date.now();
+    thread.updatedAt = Date.now();
+    saveDmThreadsDebounced();
+
+    thread.participants.forEach(pid => {
+      const entry = findSocketEntryByProfileId(pid);
+      if (entry) io.to(entry[0]).emit("dm-message", { key: threadKey, message: msg });
+    });
   });
 
   /* ── Rooms ── */
@@ -1148,6 +1296,7 @@ function shutdown(signal) {
     fs.writeFileSync(ROOMS_FILE, JSON.stringify(rooms));
     fs.writeFileSync(ROOM_MESSAGES_FILE, JSON.stringify(serializeRoomMessages()));
     fs.writeFileSync(NOTIFICATIONS_FILE, JSON.stringify(notifications));
+    fs.writeFileSync(DM_THREADS_FILE, JSON.stringify(dmThreads));
   } catch {}
   server.close(() => { log.info("closed"); process.exit(0); });
   setTimeout(() => process.exit(1), 8000);

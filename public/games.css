@@ -13,9 +13,8 @@
   padding: 18px 22px 40px;
   position: relative;
 }
-.games-body::-webkit-scrollbar { width: 3px; }
-.games-body::-webkit-scrollbar-thumb { background: rgba(21,36,58,0.16); border-radius: 3px; }
-.games-body::-webkit-scrollbar-track { background: transparent; }
+.games-body { scrollbar-width: none; }
+.games-body::-webkit-scrollbar { display: none; width: 0; }
 
 .games-search-input {
   display: block;

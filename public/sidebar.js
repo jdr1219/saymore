@@ -70,7 +70,11 @@ function updateCurrentRoomLabel() {
 }
 
 /* ── rooms list (top 5 most recently used) ── */
+function topRecentRooms(n = 5) {
+  return [...myRooms].sort((a, b) => getRoomRecency(b.id) - getRoomRecency(a.id)).slice(0, n);
+}
 function renderRoomList() {
+  renderQuickRooms();
   const list = $('room-list');
   list.innerHTML = '';
   if (!myRooms.length) {
@@ -118,6 +122,43 @@ function renderRoomList() {
     more.textContent = `+${sorted.length - 5} more room${sorted.length - 5 === 1 ? '' : 's'}`;
     list.appendChild(more);
   }
+}
+
+/* Quick-access room icons, always visible in the rail's empty space
+   (no flyout needed) so you can hop straight into any of your 5 most
+   recent rooms from wherever you are — including mid-game, since
+   switchToRoom() below always jumps back to the chat view too. */
+function renderQuickRooms() {
+  const box = $('rail-quick-rooms');
+  if (!box) return;
+  box.innerHTML = '';
+  topRecentRooms(5).forEach(room => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'rail-quick-room' + (room.id === currentRoomId ? ' active' : '');
+    row.title = room.name;
+
+    const icon = document.createElement('span');
+    icon.className = 'rail-icon-btn';
+    setRoomIconEl(icon, room);
+    row.appendChild(icon);
+
+    const name = document.createElement('span');
+    name.className = 'rail-label';
+    name.textContent = room.name;
+    row.appendChild(name);
+
+    const unread = unreadMap[room.id] || 0;
+    if (unread > 0 && room.id !== currentRoomId) {
+      const dot = document.createElement('span');
+      dot.className = 'room-row-unread-badge rail-quick-room-badge';
+      dot.textContent = unread > 9 ? '9+' : String(unread);
+      row.appendChild(dot);
+    }
+
+    row.addEventListener('click', () => switchToRoom(room.id));
+    box.appendChild(row);
+  });
 }
 
 /* ── searchable emoji picker (room icons) ── */
@@ -398,23 +439,39 @@ function renderNotiList() {
       text.innerHTML = `You were removed from <b>${escapeHtml(n.roomName)}</b>`;
     } else if (n.type === 'banned') {
       text.innerHTML = `You were banned from <b>${escapeHtml(n.roomName)}</b> until ${new Date(n.until).toLocaleString()}`;
+    } else if (n.type === 'follow') {
+      text.innerHTML = `<b>${escapeHtml(n.fromName)}</b> followed you`;
+    } else if (n.type === 'dm-request') {
+      text.innerHTML = `<b>${escapeHtml(n.fromName)}</b> wants to message you`;
+    } else if (n.type === 'dm-accepted') {
+      text.innerHTML = `<b>${escapeHtml(n.fromName)}</b> accepted your message request`;
     } else {
       text.textContent = n.text || '';
     }
     row.appendChild(text);
+
+    if (n.type === 'follow' || n.type === 'dm-request' || n.type === 'dm-accepted') {
+      row.classList.add('noti-row-clickable');
+      row.addEventListener('click', () => {
+        if (typeof openProfilePage === 'function' && n.fromProfileId) openProfilePage(n.fromProfileId);
+        if (!n.read) { socket.emit('mark-notification-read', { id: n.id }); n.read = true; renderNotiList(); }
+      });
+    }
 
     const time = document.createElement('div');
     time.className = 'noti-row-time';
     time.textContent = timeAgoShort(n.ts);
     row.appendChild(time);
 
-    const actionable = n.type === 'join-request' || n.type === 'room-invite' || n.type === 'coadmin-invite';
+    const actionable = n.type === 'join-request' || n.type === 'room-invite' || n.type === 'coadmin-invite' || n.type === 'dm-request';
     if (actionable) {
       const actions = document.createElement('div');
       actions.className = 'noti-row-actions';
       const respond = approve => {
         if (n.type === 'join-request') {
           socket.emit('respond-join', { roomId: n.roomId, requesterClientId: n.fromClientId, approve });
+        } else if (n.type === 'dm-request') {
+          socket.emit('dm-respond', { threadKey: n.threadKey, approve });
         } else {
           socket.emit('respond-invite', { roomId: n.roomId, approve, coAdmin: n.type === 'coadmin-invite' });
         }
@@ -425,10 +482,10 @@ function renderNotiList() {
       };
       const accept = document.createElement('button');
       accept.className = 'noti-accept-btn'; accept.textContent = 'Accept';
-      accept.addEventListener('click', () => respond(true));
+      accept.addEventListener('click', e => { e.stopPropagation(); respond(true); });
       const deny = document.createElement('button');
       deny.className = 'noti-deny-btn'; deny.textContent = 'Deny';
-      deny.addEventListener('click', () => respond(false));
+      deny.addEventListener('click', e => { e.stopPropagation(); respond(false); });
       actions.appendChild(accept); actions.appendChild(deny);
       row.appendChild(actions);
     } else if (!n.read) {
@@ -511,7 +568,10 @@ socket.on('notification', n => {
     n.type === 'coadmin-invite' ? `${n.fromName} wants to make you co-admin of ${n.roomName}` :
     n.type === 'invite-accepted' ? `${n.fromName} joined ${n.roomName}` :
     n.type === 'kicked' ? `You were removed from ${n.roomName}` :
-    n.type === 'banned' ? `You were banned from ${n.roomName}` : 'New notification'
+    n.type === 'banned' ? `You were banned from ${n.roomName}` :
+    n.type === 'follow' ? `${n.fromName} followed you` :
+    n.type === 'dm-request' ? `${n.fromName} wants to message you` :
+    n.type === 'dm-accepted' ? `${n.fromName} accepted your message request` : 'New notification'
   );
 });
 socket.on('room-created', room => {
