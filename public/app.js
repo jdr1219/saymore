@@ -608,6 +608,10 @@ socket.on('name-taken', () => {
   $('name-input').classList.remove('shake'); void $('name-input').offsetWidth; $('name-input').classList.add('shake');
 });
 socket.on('error-msg', msg => {
+  if (!$('profile-view').classList.contains('hidden')) {
+    $(profilePageIsSelf ? 'profile-page-name-error' : 'profile-page-error').textContent = msg;
+    return;
+  }
   const profileSection = document.querySelector('.rail-section[data-section="profile"]');
   if (profileSection && profileSection.classList.contains('section-expanded')) { $('profile-menu-error').textContent = msg; return; }
   if (!$('login-screen').classList.contains('hidden')) { $('join-btn').disabled = false; showFieldError(msg); return; }
@@ -1468,11 +1472,21 @@ function buildMessageDOM(data, isOwn, fromHistory) {
         av.style.background = userColor(user);
         av.textContent = user[0].toUpperCase();
       }
+      if (data.profileId) {
+        av.classList.add('avatar-clickable');
+        av.title = `View ${user}'s profile`;
+        av.addEventListener('click', e => { e.stopPropagation(); openProfilePage(data.profileId); });
+      }
       group.appendChild(av);
     }
     stack = document.createElement('div'); stack.className = 'bubble-stack';
     if (!isOwn) {
       const nm = document.createElement('div'); nm.className = 'sender-name'; nm.textContent = user;
+      if (data.profileId) {
+        nm.classList.add('sender-name-clickable');
+        nm.title = `View ${user}'s profile`;
+        nm.addEventListener('click', e => { e.stopPropagation(); openProfilePage(data.profileId); });
+      }
       stack.appendChild(nm);
     }
     group.appendChild(stack); box.appendChild(group);

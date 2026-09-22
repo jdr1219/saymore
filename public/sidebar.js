@@ -445,18 +445,12 @@ function renderNotiList() {
       text.innerHTML = `<b>${escapeHtml(n.fromName)}</b> wants to message you`;
     } else if (n.type === 'dm-accepted') {
       text.innerHTML = `<b>${escapeHtml(n.fromName)}</b> accepted your message request`;
+    } else if (n.type === 'invite-declined') {
+      text.innerHTML = `<b>${escapeHtml(n.fromName)}</b> declined your invite to <b>${escapeHtml(n.roomName)}</b>`;
     } else {
       text.textContent = n.text || '';
     }
     row.appendChild(text);
-
-    if (n.type === 'follow' || n.type === 'dm-request' || n.type === 'dm-accepted') {
-      row.classList.add('noti-row-clickable');
-      row.addEventListener('click', () => {
-        if (typeof openProfilePage === 'function' && n.fromProfileId) openProfilePage(n.fromProfileId);
-        if (!n.read) { socket.emit('mark-notification-read', { id: n.id }); n.read = true; renderNotiList(); }
-      });
-    }
 
     const time = document.createElement('div');
     time.className = 'noti-row-time';
@@ -464,6 +458,9 @@ function renderNotiList() {
     row.appendChild(time);
 
     const actionable = n.type === 'join-request' || n.type === 'room-invite' || n.type === 'coadmin-invite' || n.type === 'dm-request';
+    const opensProfile = (n.type === 'follow' || n.type === 'dm-request' || n.type === 'dm-accepted') && !!n.fromProfileId;
+    if (opensProfile) row.classList.add('noti-row-clickable');
+
     if (actionable) {
       const actions = document.createElement('div');
       actions.className = 'noti-row-actions';
@@ -473,7 +470,7 @@ function renderNotiList() {
         } else if (n.type === 'dm-request') {
           socket.emit('dm-respond', { threadKey: n.threadKey, approve });
         } else {
-          socket.emit('respond-invite', { roomId: n.roomId, approve, coAdmin: n.type === 'coadmin-invite' });
+          socket.emit('respond-invite', { roomId: n.roomId, approve });
         }
         // requests/invites disappear once actioned, so they can't be re-accepted/re-declined
         socket.emit('dismiss-notification', { id: n.id });
@@ -488,8 +485,17 @@ function renderNotiList() {
       deny.addEventListener('click', e => { e.stopPropagation(); respond(false); });
       actions.appendChild(accept); actions.appendChild(deny);
       row.appendChild(actions);
-    } else if (!n.read) {
-      row.addEventListener('click', () => { socket.emit('mark-notification-read', { id: n.id }); n.read = true; renderNotiList(); });
+      // dm-request also opens the requester's profile on a row click
+      // outside the buttons (stopPropagation above keeps them separate)
+      if (opensProfile) row.addEventListener('click', () => openProfilePage(n.fromProfileId));
+    } else if (opensProfile || !n.read) {
+      // one listener covers both: open the profile if this notification
+      // links to one, and mark it read either way — previously these
+      // were two separate listeners that both fired on every click
+      row.addEventListener('click', () => {
+        if (opensProfile) openProfilePage(n.fromProfileId);
+        if (!n.read) { socket.emit('mark-notification-read', { id: n.id }); n.read = true; renderNotiList(); }
+      });
     }
 
     list.appendChild(row);
@@ -571,7 +577,8 @@ socket.on('notification', n => {
     n.type === 'banned' ? `You were banned from ${n.roomName}` :
     n.type === 'follow' ? `${n.fromName} followed you` :
     n.type === 'dm-request' ? `${n.fromName} wants to message you` :
-    n.type === 'dm-accepted' ? `${n.fromName} accepted your message request` : 'New notification'
+    n.type === 'dm-accepted' ? `${n.fromName} accepted your message request` :
+    n.type === 'invite-declined' ? `${n.fromName} declined your invite to ${n.roomName}` : 'New notification'
   );
 });
 socket.on('room-created', room => {
@@ -594,6 +601,13 @@ socket.on('room-deleted', ({ roomId }) => {
     showToast('This room was deleted');
     switchToRoom('general');
   }
+});
+/* You were kicked/banned out of the room you're actively looking at
+   right now — the room itself still exists for everyone else, so
+   this bounces just your own view back to general rather than
+   treating it as deleted. */
+socket.on('removed-from-room', ({ roomId }) => {
+  if (currentRoomId === roomId) switchToRoom('general');
 });
 socket.on('room-history', ({ roomId, room }) => {
   currentRoomId = roomId;

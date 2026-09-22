@@ -446,6 +446,10 @@ body.select-mode-active .bubble { cursor:pointer; }
 
 .rs-invite-result-name-link { cursor:pointer; }
 .rs-invite-result-name-link:hover { text-decoration:underline; color:var(--blue-deep); }
+.avatar-clickable { cursor:pointer; transition:transform .15s var(--ease); }
+.avatar-clickable:hover { transform:scale(1.08); }
+.sender-name-clickable { cursor:pointer; }
+.sender-name-clickable:hover { text-decoration:underline; }
 .rd-empty { text-align:center; color:var(--ink-soft); font-size:13px; font-style:italic; margin-top:40px; }
 .rd-row { display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--recv-bg); border:1px solid var(--recv-border); border-radius:16px; padding:12px 14px; }
 .rd-info { min-width:0; flex:1; }

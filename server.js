@@ -148,10 +148,20 @@ function saveDebounced() {
    same public IP (e.g. same household/office NAT) shares one
    saved profile — a known tradeoff of IP-based recognition. */
 const PROFILES_FILE = path.join(__dirname, "data", "profiles.json");
-function loadProfiles() {
-  try { return JSON.parse(fs.readFileSync(PROFILES_FILE, "utf8")); }
-  catch { return {}; }
+/* All the maps below are keyed by strings a user can influence to some
+   degree (name, ip, room id, name#code) — plain {} objects inherit
+   Object.prototype, whose special __proto__ accessor means a key that's
+   literally the string "__proto__" doesn't just set a normal property,
+   it reassigns the object's actual prototype. A user picking that as
+   their display name would silently corrupt the whole store. Loading
+   into (and creating) these as null-prototype objects closes that off
+   for every key, not just that one name. */
+function nullProtoMap(obj) { return Object.assign(Object.create(null), obj); }
+function loadJsonMap(file) {
+  try { return nullProtoMap(JSON.parse(fs.readFileSync(file, "utf8"))); }
+  catch { return Object.create(null); }
 }
+function loadProfiles() { return loadJsonMap(PROFILES_FILE); }
 let profileSaveTimer = null;
 function saveProfilesDebounced() {
   clearTimeout(profileSaveTimer);
@@ -171,10 +181,7 @@ function saveProfilesDebounced() {
    memberships/admin/co-admin/ban references over to the new device's
    clientId, so access follows the account rather than the browser. */
 const IDENTITIES_FILE = path.join(__dirname, "data", "identities.json");
-function loadIdentities() {
-  try { return JSON.parse(fs.readFileSync(IDENTITIES_FILE, "utf8")); }
-  catch { return {}; }
-}
+function loadIdentities() { return loadJsonMap(IDENTITIES_FILE); }
 let identitiesSaveTimer = null;
 function saveIdentitiesDebounced() {
   clearTimeout(identitiesSaveTimer);
@@ -241,10 +248,7 @@ function migrateClientId(oldCid, newCid) {
    a user (who becomes its admin), has its own message history,
    and gates entry behind an admin-approved join request. ── */
 const ROOMS_FILE = path.join(__dirname, "data", "rooms.json");
-function loadRooms() {
-  try { return JSON.parse(fs.readFileSync(ROOMS_FILE, "utf8")); }
-  catch { return {}; }
-}
+function loadRooms() { return loadJsonMap(ROOMS_FILE); }
 let roomsSaveTimer = null;
 function saveRoomsDebounced() {
   clearTimeout(roomsSaveTimer);
@@ -293,10 +297,7 @@ function saveRoomMessagesDebounced() {
 
 /* ── Per-user notification inbox (join requests + their outcomes) ── */
 const NOTIFICATIONS_FILE = path.join(__dirname, "data", "notifications.json");
-function loadNotifications() {
-  try { return JSON.parse(fs.readFileSync(NOTIFICATIONS_FILE, "utf8")); }
-  catch { return {}; }
-}
+function loadNotifications() { return loadJsonMap(NOTIFICATIONS_FILE); }
 let notifSaveTimer = null;
 function saveNotificationsDebounced() {
   clearTimeout(notifSaveTimer);
@@ -315,10 +316,7 @@ function saveNotificationsDebounced() {
    participants' profileIds (order-independent) so there's exactly
    one thread per pair no matter who reaches out first. */
 const DM_THREADS_FILE = path.join(__dirname, "data", "dm-threads.json");
-function loadDmThreads() {
-  try { return JSON.parse(fs.readFileSync(DM_THREADS_FILE, "utf8")); }
-  catch { return {}; }
-}
+function loadDmThreads() { return loadJsonMap(DM_THREADS_FILE); }
 let dmThreadsSaveTimer = null;
 function saveDmThreadsDebounced() {
   clearTimeout(dmThreadsSaveTimer);
@@ -361,7 +359,7 @@ const rateLimits = {};
    inbox) but withholds the live push; turning sleep mode back off
    flushes everything that queued up while it was on. */
 const sleepUsers = new Set();      // usernameLower currently asleep
-const pendingPush = {};            // usernameLower -> [notif, ...] queued while asleep
+const pendingPush = Object.create(null);  // usernameLower -> [notif, ...] queued while asleep
 
 function slugify(str) {
   return String(str || "").toLowerCase().trim()
@@ -422,6 +420,23 @@ function broadcastRoomToMembers(room) {
   Object.entries(users).forEach(([sid, x]) => {
     if (memberNames.has(x.name.toLowerCase())) io.to(sid).emit("room-updated", publicRoomInfo(room, x.clientId));
   });
+}
+/* Kicking/banning someone only removes them from the room's data —
+   without this, their socket stays joined to the Socket.IO room and
+   keeps receiving its live messages, and if they're actively looking
+   at it their view never switches away. Pulls them out of the live
+   room and, if they're currently in it, bounces their view to general. */
+function removeClientFromLiveRoom(clientId, roomId) {
+  const target = Object.entries(users).find(([, x]) => x.clientId === clientId);
+  if (!target) return;
+  const [sid, x] = target;
+  const targetSocket = io.sockets.sockets.get(sid);
+  if (targetSocket) targetSocket.leave(roomId);
+  io.to(sid).emit("my-rooms", myRoomsList(clientId));
+  if (x.roomId === roomId) {
+    x.roomId = "general";
+    io.to(sid).emit("removed-from-room", { roomId });
+  }
 }
 /* Live unread badges in the sidebar: whenever a message lands in a
    room, everyone who belongs there but isn't currently looking at it
@@ -559,16 +574,78 @@ app.delete("/api/profile", (req, res) => {
   res.json({ ok: true });
 });
 
-/* Open Graph link preview — no external API key needed */
+const dns = require("dns").promises;
+const net = require("net");
+
+/* SSRF guard for the link-preview fetcher below — a chat message can
+   contain any URL, and without this the server would happily fetch
+   internal/private addresses (including cloud metadata endpoints like
+   169.254.169.254) on a stranger's behalf and hand back whatever it finds. */
+function isPrivateOrReservedIp(ip) {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split(".").map(Number);
+    if (a === 10 || a === 127 || a === 0 || a >= 224) return true;   // private/loopback/reserved/multicast
+    if (a === 169 && b === 254) return true;                        // link-local incl. cloud metadata
+    if (a === 172 && b >= 16 && b <= 31) return true;                // 172.16.0.0/12
+    if (a === 192 && b === 168) return true;                         // 192.168.0.0/16
+    return false;
+  }
+  if (net.isIPv6(ip)) {
+    const lower = ip.toLowerCase();
+    if (lower === "::1" || lower === "::") return true;
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // fc00::/7 unique-local
+    if (lower.startsWith("fe80")) return true;                         // link-local
+    const v4mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (v4mapped) return isPrivateOrReservedIp(v4mapped[1]);
+    return false;
+  }
+  return true; // unrecognized format — fail closed
+}
+async function isSafeExternalUrl(urlStr) {
+  let parsed;
+  try { parsed = new URL(urlStr); } catch { return false; }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "0.0.0.0") return false;
+  try {
+    const records = await dns.lookup(hostname, { all: true });
+    if (!records.length || records.some(r => isPrivateOrReservedIp(r.address))) return false;
+  } catch { return false; } // can't resolve it — don't fetch it
+  return true;
+}
+
 const previewCache = new Map();
-async function fetchPreview(url) {
+async function fetchPreview(url, redirectsLeft = 3) {
   if (previewCache.has(url)) return previewCache.get(url);
+  if (!(await isSafeExternalUrl(url))) return null;
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 4000);
-    const res = await fetch(url, { signal: ctrl.signal, headers: { "User-Agent": "Mozilla/5.0 SayMoreBot" } });
+    const res = await fetch(url, { signal: ctrl.signal, redirect: "manual", headers: { "User-Agent": "Mozilla/5.0 SayMoreBot" } });
     clearTimeout(t);
-    const html = await res.text();
+
+    // redirects are followed manually, re-validating each hop, so a
+    // safe-looking URL can't bounce through a 3xx into an internal one
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get("location");
+      if (!location || redirectsLeft <= 0) return null;
+      const next = new URL(location, url).toString();
+      return fetchPreview(next, redirectsLeft - 1);
+    }
+    if (!res.ok || !res.body) return null;
+
+    // cap how much we read — meta tags live in <head>, no need to pull
+    // down an attacker's (or just a very large) entire page
+    const MAX_BYTES = 500000;
+    const reader = res.body.getReader();
+    const chunks = []; let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value); received += value.length;
+      if (received >= MAX_BYTES) { reader.cancel().catch(() => {}); break; }
+    }
+    const html = Buffer.concat(chunks.map(c => Buffer.from(c))).toString("utf8");
     const pick = re => (html.match(re) || [])[1];
     const preview = {
       url,
@@ -578,6 +655,11 @@ async function fetchPreview(url) {
           || pick(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i) || "",
       image: pick(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) || null,
     };
+    // an attacker-controlled og:image could itself point at an internal
+    // address and get rendered as an <img src> in every viewer's browser —
+    // that's a client-side fetch (not this server's), but still only worth
+    // trusting if it's a normal external http(s) URL
+    if (preview.image && !/^https?:\/\//i.test(preview.image)) preview.image = null;
     previewCache.set(url, preview);
     return preview;
   } catch { return null; }
@@ -586,7 +668,23 @@ async function fetchPreview(url) {
 io.on("connection", socket => {
   log.info("connect", { id: socket.id });
 
-  socket.on("join", ({ name, clientId, avatar, code, mode } = {}) => {
+  // Wraps every handler below in try/catch so one bad/unexpected payload
+  // can't take down the whole process (and disconnect every other
+  // connected user with it) — it just logs and aborts that one event.
+  // Async handlers (returning a promise) get the same treatment for
+  // rejections that aren't already caught internally.
+  const on = (event, handler) => socket.on(event, (...args) => {
+    try {
+      const result = handler(...args);
+      if (result && typeof result.catch === "function") {
+        result.catch(err => log.error("handler-rejection", { event, err: err?.message || String(err) }));
+      }
+    } catch (err) {
+      log.error("handler-error", { event, err: err?.message || String(err) });
+    }
+  });
+
+  on("join", ({ name, clientId, avatar, code, mode } = {}) => {
     const username = sanitize(name, 24);
     const cid = sanitize(clientId, 64) || null;
     if (!username) return socket.emit("error-msg", "Invalid name");
@@ -671,7 +769,7 @@ io.on("connection", socket => {
 
   /* Change your 4-digit code from profile settings — must stay
      unique for your name, same as at signup. */
-  socket.on("change-code", ({ newCode } = {}) => {
+  on("change-code", ({ newCode } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const clean = cleanCode(newCode);
     if (clean.length !== 4) return socket.emit("error-msg", "Code must be 4 digits");
@@ -691,7 +789,7 @@ io.on("connection", socket => {
      standing (promoting a co-admin to admin if they were the sole admin),
      and their notification inbox. Messages they've already sent stay
      (deleting an account isn't retroactive message deletion). */
-  socket.on("delete-account", () => {
+  on("delete-account", () => {
     const u = users[socket.id]; if (!u) return;
     if (u.code) delete identities[identityKey(u.name, u.code)];
     saveIdentitiesDebounced();
@@ -721,7 +819,7 @@ io.on("connection", socket => {
     socket.disconnect(true);
   });
 
-  socket.on("update-profile", (data = {}) => {
+  on("update-profile", (data = {}) => {
     const u = users[socket.id]; if (!u) return;
     let newName = u.name;
     if (typeof data.name === "string") {
@@ -752,6 +850,22 @@ io.on("connection", socket => {
         saveIdentitiesDebounced();
       }
     }
+    // notifications/sleep-mode state are keyed by plain lowercase name
+    // (regardless of whether the account has a code), so they need the
+    // same re-keying or a rename silently orphans your whole inbox
+    if (oldName.toLowerCase() !== newName.toLowerCase()) {
+      const oldKey = oldName.toLowerCase(), newKey = newName.toLowerCase();
+      if (notifications[oldKey]) {
+        notifications[newKey] = [...(notifications[newKey] || []), ...notifications[oldKey]].slice(0, 50);
+        delete notifications[oldKey];
+        saveNotificationsDebounced();
+      }
+      if (sleepUsers.has(oldKey)) { sleepUsers.delete(oldKey); sleepUsers.add(newKey); }
+      if (pendingPush[oldKey]) {
+        pendingPush[newKey] = [...(pendingPush[newKey] || []), ...pendingPush[oldKey]];
+        delete pendingPush[oldKey];
+      }
+    }
     u.name = newName; u.avatar = newAvatar;
     socket.emit("profile-updated", { name: newName, avatar: newAvatar });
     if (oldName !== newName) io.emit("system", `${oldName} is now known as ${newName}`);
@@ -764,11 +878,14 @@ io.on("connection", socket => {
   });
 
   /* ── Public profile pages ── */
-  socket.on("get-profile", ({ profileId } = {}) => {
+  on("get-profile", ({ profileId } = {}) => {
     const u = users[socket.id];
     const viewerPid = u?.profileId || null;
     const identity = profileId ? findIdentityByProfileId(profileId) : (u?.code ? identities[identityKey(u.name, u.code)] : null);
-    if (!identity) return socket.emit("error-msg", "That profile couldn't be found");
+    if (!identity) {
+      if (!profileId) return socket.emit("error-msg", "Set up a 4-digit code (in your profile settings) to get a profile page");
+      return socket.emit("error-msg", "That profile couldn't be found");
+    }
     const isSelf = !!viewerPid && identity.profileId === viewerPid;
     let dm = null;
     if (!isSelf && viewerPid) {
@@ -781,7 +898,7 @@ io.on("connection", socket => {
     socket.emit("profile-data", { ...publicProfileOf(identity, viewerPid), isSelf, dm });
   });
 
-  socket.on("update-my-bio-theme", ({ bio, theme } = {}) => {
+  on("update-my-bio-theme", ({ bio, theme } = {}) => {
     const u = users[socket.id]; if (!u || !u.code) return;
     const identity = identities[identityKey(u.name, u.code)];
     if (!identity) return socket.emit("error-msg", "Set up an account (with a code) first");
@@ -792,7 +909,7 @@ io.on("connection", socket => {
     socket.emit("profile-data", { ...publicProfileOf(identity, identity.profileId), isSelf: true });
   });
 
-  socket.on("follow-profile", ({ profileId } = {}) => {
+  on("follow-profile", ({ profileId } = {}) => {
     const u = users[socket.id]; if (!u || !u.profileId) return socket.emit("error-msg", "Set up an account (with a code) first");
     if (profileId === u.profileId) return; // can't follow yourself
     const target = findIdentityByProfileId(profileId);
@@ -810,7 +927,7 @@ io.on("connection", socket => {
     socket.emit("profile-data", { ...publicProfileOf(target, u.profileId), isSelf: false });
   });
 
-  socket.on("unfollow-profile", ({ profileId } = {}) => {
+  on("unfollow-profile", ({ profileId } = {}) => {
     const u = users[socket.id]; if (!u || !u.profileId) return;
     const target = findIdentityByProfileId(profileId);
     if (!target) return socket.emit("error-msg", "That profile couldn't be found");
@@ -823,7 +940,7 @@ io.on("connection", socket => {
      Requesting a thread notifies the other person; nothing can be
      sent until they accept. If they'd already requested you first,
      reaching out back accepts it immediately (mutual interest). ── */
-  socket.on("dm-request", ({ profileId } = {}) => {
+  on("dm-request", ({ profileId } = {}) => {
     const u = users[socket.id]; if (!u || !u.profileId) return socket.emit("error-msg", "Set up an account (with a code) first");
     if (profileId === u.profileId) return socket.emit("error-msg", "That's you!");
     const target = findIdentityByProfileId(profileId);
@@ -862,7 +979,7 @@ io.on("connection", socket => {
     socket.emit("dm-thread", { key, accepted: false, pending: true, isRequester: true, otherProfileId: profileId });
   });
 
-  socket.on("dm-respond", ({ threadKey, approve } = {}) => {
+  on("dm-respond", ({ threadKey, approve } = {}) => {
     const u = users[socket.id]; if (!u || !u.profileId) return;
     const thread = dmThreads[threadKey]; if (!thread) return;
     if (!thread.participants.includes(u.profileId) || thread.requestedBy === u.profileId) return; // only the recipient responds
@@ -886,7 +1003,7 @@ io.on("connection", socket => {
     socket.emit("dm-thread-status", { key: threadKey, accepted: !!approve, declined: !approve });
   });
 
-  socket.on("dm-open", ({ threadKey } = {}) => {
+  on("dm-open", ({ threadKey } = {}) => {
     const u = users[socket.id]; if (!u || !u.profileId) return;
     const thread = dmThreads[threadKey]; if (!thread || !thread.participants.includes(u.profileId)) return;
     thread.lastRead = thread.lastRead || {};
@@ -901,7 +1018,7 @@ io.on("connection", socket => {
     });
   });
 
-  socket.on("dm-send", ({ threadKey, text } = {}) => {
+  on("dm-send", ({ threadKey, text } = {}) => {
     const u = users[socket.id]; if (!u || !u.profileId) return;
     const thread = dmThreads[threadKey]; if (!thread || !thread.accepted || !thread.participants.includes(u.profileId)) return;
     if (isRateLimited(socket.id)) return socket.emit("error-msg", "Slow down a little");
@@ -923,7 +1040,7 @@ io.on("connection", socket => {
   });
 
   /* ── Rooms ── */
-  socket.on("create-room", ({ name } = {}) => {
+  on("create-room", ({ name } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const cleanName = sanitize(name, 30);
     if (!cleanName) return socket.emit("error-msg", "Enter a room name");
@@ -948,7 +1065,7 @@ io.on("connection", socket => {
     socket.emit("room-updated", publicRoomInfo(room, u.clientId)); // so it shows up in the sidebar's room list right away, not just search
   });
 
-  socket.on("switch-room", ({ roomId } = {}) => {
+  on("switch-room", ({ roomId } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const rid = cleanId(roomId) || "general";
     const room = rid === "general" ? GENERAL_ROOM : rooms[rid];
@@ -972,7 +1089,7 @@ io.on("connection", socket => {
     });
   });
 
-  socket.on("set-room-icon", ({ roomId, icon } = {}) => {
+  on("set-room-icon", ({ roomId, icon } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const room = rooms[cleanId(roomId)]; if (!room) return;
     if (!isPrivileged(room, u.clientId)) return socket.emit("error-msg", "Only room admins can do that");
@@ -986,7 +1103,7 @@ io.on("connection", socket => {
   /* Only the original admin can delete a room outright (co-admins get
      everything else, but this one's permanent and affects everyone,
      so it stays admin-only). */
-  socket.on("delete-room", ({ roomId } = {}) => {
+  on("delete-room", ({ roomId } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const rid = cleanId(roomId);
     const room = rooms[rid]; if (!room) return;
@@ -1007,7 +1124,7 @@ io.on("connection", socket => {
     });
   });
 
-  socket.on("request-join", ({ roomId } = {}) => {
+  on("request-join", ({ roomId } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const room = rooms[cleanId(roomId)]; if (!room) return socket.emit("error-msg", "Room not found");
     if (isMember(room, u.clientId)) return socket.emit("error-msg", "You're already in that room");
@@ -1027,7 +1144,7 @@ io.on("connection", socket => {
     socket.emit("info-msg", `Request sent to join ${room.name}`);
   });
 
-  socket.on("respond-join", ({ roomId, requesterClientId, approve } = {}) => {
+  on("respond-join", ({ roomId, requesterClientId, approve } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const room = rooms[cleanId(roomId)]; if (!room) return;
     if (!isPrivileged(room, u.clientId)) return socket.emit("error-msg", "Only room admins can do that");
@@ -1055,8 +1172,10 @@ io.on("connection", socket => {
   /* Admin/co-admin invites someone (by name) to join, or to become a
      co-admin — either way it's a request the person must accept. A
      co-admin invite works on existing members too (that's how someone
-     already in the room gets promoted). */
-  socket.on("invite-to-room", ({ roomId, name, asCoAdmin } = {}) => {
+     already in the room gets promoted). The invite is tracked server-side
+     (room.invites) so respond-invite can verify it — otherwise anyone
+     could forge a respond-invite call and join/co-admin any room. */
+  on("invite-to-room", ({ roomId, name, asCoAdmin } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const room = rooms[cleanId(roomId)]; if (!room) return;
     if (!isPrivileged(room, u.clientId)) return socket.emit("error-msg", "Only room admins can invite people");
@@ -1070,6 +1189,10 @@ io.on("connection", socket => {
     if (asCoAdmin && room.coAdmins.some(c => c.clientId === targetClientId)) return socket.emit("error-msg", `${targetName} is already a co-admin`);
     if (!asCoAdmin && isMember(room, targetClientId)) return socket.emit("error-msg", `${targetName} is already in that room`);
 
+    room.invites = (room.invites || []).filter(i => i.clientId !== targetClientId);
+    room.invites.push({ clientId: targetClientId, name: targetName, asCoAdmin: !!asCoAdmin, fromName: u.name, ts: Date.now() });
+    saveRoomsDebounced();
+
     notifyUser(targetName, {
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       type: asCoAdmin ? "coadmin-invite" : "room-invite", ts: Date.now(), read: false,
@@ -1079,16 +1202,32 @@ io.on("connection", socket => {
     socket.emit("info-msg", `Invite sent to ${targetName}`);
   });
 
-  socket.on("respond-invite", ({ roomId, approve, coAdmin } = {}) => {
+  on("respond-invite", ({ roomId, approve } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const room = rooms[cleanId(roomId)]; if (!room) return socket.emit("error-msg", "Room not found");
-    if (!approve) return;
+
+    const idx = (room.invites || []).findIndex(i => i.clientId === u.clientId);
+    if (idx === -1) return socket.emit("error-msg", "That invite is no longer available");
+    const invite = room.invites[idx];
+    room.invites.splice(idx, 1);
+    saveRoomsDebounced();
+
+    if (!approve) {
+      notifyUser(invite.fromName, {
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        type: "invite-declined", ts: Date.now(), read: false,
+        roomId: room.id, roomName: room.name, roomIcon: room.icon, fromName: u.name,
+      });
+      return;
+    }
 
     if (!room.members.some(m => m.clientId === u.clientId)) room.members.push({ clientId: u.clientId, name: u.name });
-    if (coAdmin && !room.coAdmins.some(c => c.clientId === u.clientId)) room.coAdmins.push({ clientId: u.clientId, name: u.name });
+    // co-admin status comes from the stored invite, never the client's
+    // own say-so, so a plain room-invite can't be self-escalated
+    if (invite.asCoAdmin && !room.coAdmins.some(c => c.clientId === u.clientId)) room.coAdmins.push({ clientId: u.clientId, name: u.name });
     saveRoomsDebounced();
     socket.emit("my-rooms", myRoomsList(u.clientId));
-    notifyUser(room.adminName, {
+    notifyUser(invite.fromName, {
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       type: "invite-accepted", ts: Date.now(), read: false,
       roomId: room.id, roomName: room.name, roomIcon: room.icon, fromName: u.name,
@@ -1098,7 +1237,7 @@ io.on("connection", socket => {
 
   /* Sleep mode: while on, notifications land in the inbox but don't
      push live; turning it off flushes whatever queued up, all at once. */
-  socket.on("set-sleep-mode", ({ on } = {}) => {
+  on("set-sleep-mode", ({ on } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const key = u.name.toLowerCase();
     if (on) {
@@ -1114,14 +1253,14 @@ io.on("connection", socket => {
     socket.emit("sleep-mode-updated", { on: !!on });
   });
 
-  socket.on("mark-notification-read", ({ id } = {}) => {
+  on("mark-notification-read", ({ id } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const list = notifications[u.name.toLowerCase()] || [];
     const n = list.find(x => x.id === id);
     if (n) { n.read = true; saveNotificationsDebounced(); }
   });
 
-  socket.on("dismiss-notification", ({ id } = {}) => {
+  on("dismiss-notification", ({ id } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const key = u.name.toLowerCase();
     if (!notifications[key]) return;
@@ -1129,7 +1268,7 @@ io.on("connection", socket => {
     saveNotificationsDebounced();
   });
 
-  socket.on("kick-member", ({ roomId, clientId: targetId } = {}) => {
+  on("kick-member", ({ roomId, clientId: targetId } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const room = rooms[cleanId(roomId)]; if (!room) return;
     if (!canModerate(room, u.clientId, targetId)) return socket.emit("error-msg", "You can't do that");
@@ -1143,15 +1282,14 @@ io.on("connection", socket => {
         type: "kicked", ts: Date.now(), read: false,
         roomId: room.id, roomName: room.name, roomIcon: room.icon,
       });
-      const target = Object.entries(users).find(([, x]) => x.clientId === targetId);
-      if (target) io.to(target[0]).emit("my-rooms", myRoomsList(targetId));
+      removeClientFromLiveRoom(targetId, room.id);
     }
     broadcastRoomToMembers(room);
     socket.emit("room-updated", publicRoomInfo(room, u.clientId));
   });
 
   const BAN_DURATIONS = { "1h": 3600000, "1d": 86400000, "1w": 604800000, "30d": 2592000000 };
-  socket.on("ban-member", ({ roomId, clientId: targetId, duration } = {}) => {
+  on("ban-member", ({ roomId, clientId: targetId, duration } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const room = rooms[cleanId(roomId)]; if (!room) return;
     if (!canModerate(room, u.clientId, targetId)) return socket.emit("error-msg", "You can't do that");
@@ -1168,13 +1306,12 @@ io.on("connection", socket => {
       type: "banned", ts: Date.now(), read: false,
       roomId: room.id, roomName: room.name, roomIcon: room.icon, until: Date.now() + durationMs,
     });
-    const target = Object.entries(users).find(([, x]) => x.clientId === targetId);
-    if (target) io.to(target[0]).emit("my-rooms", myRoomsList(targetId));
+    removeClientFromLiveRoom(targetId, room.id);
     broadcastRoomToMembers(room);
     socket.emit("room-updated", publicRoomInfo(room, u.clientId));
   });
 
-  socket.on("load-more", ({ before, roomId } = {}) => {
+  on("load-more", ({ before, roomId } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const rid = cleanId(roomId) || "general";
     const store = getRoomStore(rid);
@@ -1184,7 +1321,7 @@ io.on("connection", socket => {
     socket.emit("more-history", { roomId: rid, msgs: store.slice(start, end).map(publicMsg), hasMore: start > 0 });
   });
 
-  socket.on("message", async data => {
+  on("message", async data => {
     const u = users[socket.id]; if (!u) return;
     const rid = cleanId(data.roomId) || "general";
     if (rid !== "general" && !isMember(rooms[rid], u.clientId)) return;
@@ -1194,7 +1331,7 @@ io.on("connection", socket => {
     if (!text && !image) return;
 
     const msg = {
-      user: u.name, avatar: u.avatar || null, socketId: socket.id, roomId: rid,
+      user: u.name, avatar: u.avatar || null, profileId: u.profileId || null, socketId: socket.id, roomId: rid,
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       ts: Date.now(), text, image, edited: false, deleted: false,
       reactionsRaw: {},
@@ -1217,7 +1354,7 @@ io.on("connection", socket => {
     }
   });
 
-  socket.on("edit-msg", ({ id, text, roomId }) => {
+  on("edit-msg", ({ id, text, roomId }) => {
     const u = users[socket.id]; if (!u) return;
     const rid = cleanId(roomId) || "general";
     const store = getRoomStore(rid);
@@ -1228,7 +1365,7 @@ io.on("connection", socket => {
     io.to(rid).emit("msg-edited", { id, text: msg.text });
   });
 
-  socket.on("delete-msg", ({ id, roomId }) => {
+  on("delete-msg", ({ id, roomId }) => {
     const u = users[socket.id]; if (!u) return;
     const rid = cleanId(roomId) || "general";
     const store = getRoomStore(rid);
@@ -1239,8 +1376,9 @@ io.on("connection", socket => {
     io.to(rid).emit("msg-deleted", { id });
   });
 
-  socket.on("react", ({ msgId, emoji, roomId }) => {
+  on("react", ({ msgId, emoji, roomId }) => {
     const u = users[socket.id]; if (!u || !msgId || !emoji) return;
+    if (isRateLimited(socket.id)) return;
     const rid = cleanId(roomId) || "general";
     const store = getRoomStore(rid);
     const msg = store.find(m => m.id === msgId);
@@ -1254,7 +1392,7 @@ io.on("connection", socket => {
     io.to(rid).emit("reaction-update", { msgId, reactions: snapshot });
   });
 
-  socket.on("seen", ({ id, roomId }) => {
+  on("seen", ({ id, roomId }) => {
     const u = users[socket.id]; if (!u) return;
     const rid = cleanId(roomId) || "general";
     const store = getRoomStore(rid);
@@ -1265,13 +1403,13 @@ io.on("connection", socket => {
     }
   });
 
-  socket.on("typing", ({ roomId } = {}) => {
+  on("typing", ({ roomId } = {}) => {
     const u = users[socket.id]; if (!u) return;
     const rid = cleanId(roomId) || "general";
     socket.to(rid).emit("typing", { user: u.name, roomId: rid });
   });
 
-  socket.on("disconnect", () => {
+  on("disconnect", () => {
     const username = users[socket.id]?.name;
     delete users[socket.id]; delete rateLimits[socket.id];
     if (username) {
